@@ -1,5 +1,5 @@
 import time
-from typing import Union
+from typing import Union, Tuple, List, Any, Dict
 import numpy as np
 from src.middlewares.slogger import SafeLogger
 from src.funcs.base import emd_efecto, ABECEDARY
@@ -107,9 +107,12 @@ class QNodes(SIA):
         self.tiempos: tuple[np.ndarray, np.ndarray]
         self.etiquetas = [tuple(s.lower() for s in ABECEDARY), ABECEDARY]
         self.vertices: set[tuple]
-        # self.memoria_delta = dict()
+        
+        # Cachés para memoización
+        self.memoria_delta = dict()  # Cache para cálculos de delta individuales
         self.memoria_omega = dict()
         self.memoria_particiones = dict()
+        self.memoria_combinaciones = dict()  # Cache para combinaciones omega-delta
 
         self.indices_alcance: np.ndarray
         self.indices_mecanismo: np.ndarray
@@ -250,13 +253,18 @@ class QNodes(SIA):
                 deltas_ciclo.pop(indice_mip)
                 ...
 
-            self.memoria_particiones[
-                tuple(
-                    deltas_ciclo[LAST_IDX]
-                    if isinstance(deltas_ciclo[LAST_IDX], list)
-                    else deltas_ciclo
-                )
-            ] = emd_particion_candidata, dist_particion_candidata
+            particion_candidata = tuple(
+                deltas_ciclo[LAST_IDX]
+                if isinstance(deltas_ciclo[LAST_IDX], list)
+                else deltas_ciclo
+            )
+            
+            self.memoria_particiones[particion_candidata] = emd_particion_candidata, dist_particion_candidata
+            
+            # Verificar si la pérdida es cero y terminar el proceso si es así
+            if emd_particion_candidata == 0:
+                self.logger.debug("¡Encontrada partición óptima con pérdida cero!")
+                return particion_candidata
 
             par_candidato = (
                 [omegas_ciclo[LAST_IDX]]
@@ -278,91 +286,144 @@ class QNodes(SIA):
             self.memoria_particiones, key=lambda k: self.memoria_particiones[k][0]
         )
 
+    def _generar_clave_delta(self, delta: Union[tuple, list[tuple]]) -> tuple:
+        """
+        Genera una clave única para un delta que se puede usar en un diccionario.
+        
+        Args:
+            delta: Un nodo individual (tupla) o grupo de nodos (lista de tuplas)
+            
+        Returns:
+            Tupla que sirve como clave única para el caché
+        """
+        if isinstance(delta, tuple):
+            return (delta,)
+        else:
+            # Ordenamos para asegurar consistencia independiente del orden original
+            return tuple(sorted(delta))
+            
+    def _generar_clave_combinacion(self, delta: Union[tuple, list[tuple]], 
+                                  omegas: list[Union[tuple, list[tuple]]]) -> tuple:
+        """
+        Genera una clave única para una combinación omega-delta.
+        
+        Args:
+            delta: Un nodo o grupo de nodos
+            omegas: Lista de nodos ya agrupados
+            
+        Returns:
+            Tupla que sirve como clave única para el caché
+        """
+        # Normalizar delta
+        delta_clave = self._generar_clave_delta(delta)
+        
+        # Normalizar omegas
+        omega_elementos = []
+        for omega in omegas:
+            if isinstance(omega, list):
+                for omg in omega:
+                    omega_elementos.append(omg)
+            else:
+                omega_elementos.append(omega)
+        
+        omega_clave = tuple(sorted(omega_elementos))
+        
+        return (delta_clave, omega_clave)
+
     def funcion_submodular(
         self, deltas: Union[tuple, list[tuple]], omegas: list[Union[tuple, list[tuple]]]
     ):
         """
-        Evalúa el impacto de combinar el conjunto de nodos individual delta y su agrupación con el conjunto omega, calculando la diferencia entre EMD (Earth Mover's Distance) de las configuraciones, en conclusión los nodos delta evaluados individualmente y su combinación con el conjunto omega.
-
-        El proceso se realiza en dos fases principales:
-
-        1. Evaluación Individual:
-           - Crea una copia del estado temporal del subsistema.
-           - Activa los nodos delta en su tiempo correspondiente (presente/futuro).
-           - Si el delta ya fue evaluado antes, recupera su EMD y distribución marginal de memoria
-           - Si no, ha de:
-             * Identificar dimensiones activas en presente y futuro.
-             * Realiza bipartición del subsistema con esas dimensiones.
-             * Calcular la distribución marginal y EMD respecto al subsistema.
-             * Guarda resultados en memoria para seguro un uso futuro.
-
-        2. Evaluación Combinada:
-           - Sobre la misma copia temporal, activa también los nodos omega.
-           - Calcula dimensiones activas totales (delta + omega).
-           - Realiza bipartición del subsistema completo.
-           - Obtiene EMD de la combinación.
-
+        Evalúa el impacto de combinar el conjunto de nodos individual delta y su agrupación con el conjunto omega.
+        
+        Utiliza memoización para evitar recálculos redundantes.
+        
         Args:
             deltas: Un nodo individual (tupla) o grupo de nodos (lista de tuplas)
-                   donde cada tupla está identificada por su (tiempo, índice), sea el tiempo t_0 identificado como 0, t_1 como 1 y, el índice hace referencia a las variables/dimensiones habilitadas para operaciones de substracción/marginalización sobre el subsistema, tal que genere la partición.
-            omegas: Lista de nodos ya agrupados, puede contener tuplas individuales
-                   o listas de tuplas para grupos formados por los pares candidatos o más uniones entre sí (grupos candidatos).
-
+            omegas: Lista de nodos ya agrupados
+            
         Returns:
-            tuple: (
-                EMD de la combinación omega y delta,
-                EMD del delta individual,
-                Distribución marginal del delta individual
-            )
-            Esto lo hice así para hacer almacenamiento externo de la emd individual y su distribución marginal en las particiones candidatas.
+            tuple: (EMD combinación, EMD delta, distribución marginal delta)
         """
-        emd_delta = INFTY_NEG
-        temporal = [[], []]
-
-        if isinstance(deltas, tuple):
-            d_tiempo, d_indice = deltas
-            temporal[d_tiempo].append(d_indice)
-
+        # Generar claves para caché
+        clave_delta = self._generar_clave_delta(deltas)
+        clave_combinacion = self._generar_clave_combinacion(deltas, omegas)
+        
+        # Verificar si ya tenemos el resultado para el delta individual
+        if clave_delta in self.memoria_delta:
+            emd_delta, vector_delta_marginal = self.memoria_delta[clave_delta]
+            self.logger.debug(f"Cache hit para delta {clave_delta}")
         else:
-            for delta in deltas:
-                d_tiempo, d_indice = delta
+            # Calcular para delta individual
+            temporal = [[], []]
+            
+            if isinstance(deltas, tuple):
+                d_tiempo, d_indice = deltas
                 temporal[d_tiempo].append(d_indice)
-
-        copia_delta = self.sia_subsistema
-
-        dims_alcance_delta = temporal[EFECTO]
-        dims_mecanismo_delta = temporal[ACTUAL]
-
-        particion_delta = copia_delta.bipartir(
-            np.array(dims_alcance_delta, dtype=np.int8),
-            np.array(dims_mecanismo_delta, dtype=np.int8),
-        )
-        vector_delta_marginal = particion_delta.distribucion_marginal()
-        emd_delta = emd_efecto(vector_delta_marginal, self.sia_dists_marginales)
-
-        # Unión #
-
-        for omega in omegas:
-            if isinstance(omega, list):
-                for omg in omega:
-                    o_tiempo, o_indice = omg
-                    temporal[o_tiempo].append(o_indice)
             else:
-                o_tiempo, o_indice = omega
-                temporal[o_tiempo].append(o_indice)
-
-        copia_union = self.sia_subsistema
-
-        dims_alcance_union = temporal[EFECTO]
-        dims_mecanismo_union = temporal[ACTUAL]
-
-        particion_union = copia_union.bipartir(
-            np.array(dims_alcance_union, dtype=np.int8),
-            np.array(dims_mecanismo_union, dtype=np.int8),
-        )
-        vector_union_marginal = particion_union.distribucion_marginal()
-        emd_union = emd_efecto(vector_union_marginal, self.sia_dists_marginales)
-
+                for delta in deltas:
+                    d_tiempo, d_indice = delta
+                    temporal[d_tiempo].append(d_indice)
+            
+            copia_delta = self.sia_subsistema
+            
+            dims_alcance_delta = temporal[EFECTO]
+            dims_mecanismo_delta = temporal[ACTUAL]
+            
+            particion_delta = copia_delta.bipartir(
+                np.array(dims_alcance_delta, dtype=np.int8),
+                np.array(dims_mecanismo_delta, dtype=np.int8),
+            )
+            vector_delta_marginal = particion_delta.distribucion_marginal()
+            emd_delta = emd_efecto(vector_delta_marginal, self.sia_dists_marginales)
+            
+            # Guardar en caché
+            self.memoria_delta[clave_delta] = (emd_delta, vector_delta_marginal)
+            self.logger.debug(f"Nuevo cálculo para delta {clave_delta}")
+        
+        # Verificar si ya tenemos el resultado para la combinación
+        if clave_combinacion in self.memoria_combinaciones:
+            emd_union = self.memoria_combinaciones[clave_combinacion]
+            self.logger.debug(f"Cache hit para combinación {clave_combinacion}")
+        else:
+            # Calcular para la combinación
+            temporal = [[], []]
+            
+            # Primero agregamos deltas
+            if isinstance(deltas, tuple):
+                d_tiempo, d_indice = deltas
+                temporal[d_tiempo].append(d_indice)
+            else:
+                for delta in deltas:
+                    d_tiempo, d_indice = delta
+                    temporal[d_tiempo].append(d_indice)
+            
+            # Luego agregamos omegas
+            for omega in omegas:
+                if isinstance(omega, list):
+                    for omg in omega:
+                        o_tiempo, o_indice = omg
+                        temporal[o_tiempo].append(o_indice)
+                else:
+                    o_tiempo, o_indice = omega
+                    temporal[o_tiempo].append(o_indice)
+            
+            copia_union = self.sia_subsistema
+            
+            dims_alcance_union = temporal[EFECTO]
+            dims_mecanismo_union = temporal[ACTUAL]
+            
+            particion_union = copia_union.bipartir(
+                np.array(dims_alcance_union, dtype=np.int8),
+                np.array(dims_mecanismo_union, dtype=np.int8),
+            )
+            vector_union_marginal = particion_union.distribucion_marginal()
+            emd_union = emd_efecto(vector_union_marginal, self.sia_dists_marginales)
+            
+            # Guardar en caché
+            self.memoria_combinaciones[clave_combinacion] = emd_union
+            self.logger.debug(f"Nuevo cálculo para combinación {clave_combinacion}")
+        
         return emd_union, emd_delta, vector_delta_marginal
 
     def nodes_complement(self, nodes: list[tuple[int, int]]):
