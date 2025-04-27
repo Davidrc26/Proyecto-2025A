@@ -152,17 +152,27 @@ Supongamos 3 nodos y parámetros muy sencillos:
 ## 5. Diagrama de flujo
 ```mermaid
 flowchart TD
-    A[Inicio] --> B[Inicializar ACO y parámetros]
-    B --> C[Preparar subsistema]
-    C --> D[Inicializar tau y eta]
-    D --> E[Bucle t=1..T]
-    E --> F[Construir soluciones (K hormigas)]
-    F --> G[Evadir trivialidad y evaluar φ]
-    G --> H[Actualizar best si φ mejor]
-    H --> I[Evaporar tau]
-    I --> J[Depositar feromona de mejor hormiga]
-    J --> E
-    E --> K[Formatear best_partition]
-    K --> L[Crear y retornar Solution]
+    A[Inicio] --> B[Preparar subsistema]
+    B --> C[Determinar m,n y calcular N = m+n]
+    C --> D[Inicializar tau (feromona) y eta (heurística)]
+    D --> E[Bucle t = 1..T]
+    
+    subgraph Iteración
+      E --> F[Para cada hormiga k = 1..K]
+      F --> G[Construir bits: decidir grupo nodo a nodo]
+      G --> H[Evitar trivialidad si todos en mismo grupo]
+      H --> I[Convertir bits en subalcance y submecanismo]
+      I --> J[Evaluar partición y calcular φ]
+      J --> K[Registrar solución y φ]
+      K --> L[Actualizar mejor global si φ < best_phi]
+      L --> M[¿Más hormigas?]
+      M -->|Sí| F
+      M -->|No| N[Evaporar tau]
+      N --> O[Depositar feromona de mejor hormiga local]
+      O --> P[¿Más iteraciones?]
+      P -->|Sí| E
+      P -->|No| Q[Formatear mejor partición]
+      Q --> R[Crear objeto Solution y retornar]
+    end
 ```
 
