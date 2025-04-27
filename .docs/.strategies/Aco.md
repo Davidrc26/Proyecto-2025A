@@ -153,26 +153,26 @@ Supongamos 3 nodos y parámetros muy sencillos:
 ```mermaid
 flowchart TD
     A[Inicio] --> B[Preparar subsistema]
-    B --> C[Determinar m,n y calcular N = m+n]
-    C --> D[Inicializar tau (feromona) y eta (heurística)]
-    D --> E[Bucle t = 1..T]
-    
-    subgraph Iteración
-      E --> F[Para cada hormiga k = 1..K]
-      F --> G[Construir bits: decidir grupo nodo a nodo]
-      G --> H[Evitar trivialidad si todos en mismo grupo]
-      H --> I[Convertir bits en subalcance y submecanismo]
-      I --> J[Evaluar partición y calcular φ]
-      J --> K[Registrar solución y φ]
-      K --> L[Actualizar mejor global si φ < best_phi]
-      L --> M[¿Más hormigas?]
-      M -->|Sí| F
+    B --> C[Determinar m y n y calcular N]
+    C --> D[Inicializar tau y eta]
+    D --> E[Bucle t = 1 a T]
+
+    subgraph Iteracion
+      E --> F[Para cada hormiga k = 1 a K]
+      F --> G[Asignar bits nodo a nodo]
+      G --> H[Evitar trivialidad]
+      H --> I[Formar subalcance y submecanismo]
+      I --> J[Evaluar particion y calcular phi]
+      J --> K[Guardar solucion y phi]
+      K --> L[Actualizar mejor global]
+      L --> M[¿Mas hormigas?]
+      M -->|Si| F
       M -->|No| N[Evaporar tau]
-      N --> O[Depositar feromona de mejor hormiga local]
-      O --> P[¿Más iteraciones?]
-      P -->|Sí| E
-      P -->|No| Q[Formatear mejor partición]
-      Q --> R[Crear objeto Solution y retornar]
+      N --> O[Depositar feromona mejor hormiga]
+      O --> P[¿Mas iteraciones?]
+      P -->|Si| E
+      P -->|No| Q[Formatear particion]
+      Q --> R[Retornar Solution]
     end
 ```
 
