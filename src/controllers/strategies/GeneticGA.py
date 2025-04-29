@@ -15,10 +15,77 @@ from src.models.core.solution import Solution
 
 class GeneticGA(SIA):
     """
-    Algoritmo Genético (GA) optimizado con early stopping y cache de fitness.
+    Clase GeneticGA para la optimización de redes mediante Algoritmos Genéticos (GA).
 
-    Hereda de SIA para reutilizar la preparación de subsistema y bipartición.
+    Esta clase implementa un gestor principal para la optimización de redes utilizando
+    Algoritmos Genéticos. Hereda de la clase base SIA (Sistema de Información Activo) y
+    proporciona funcionalidades para encontrar la partición óptima que minimiza la pérdida
+    de información en el sistema.
+
+    Args:
+    ----
+        gestor (Manager):
+            Instancia de la clase Manager que contiene la configuración del sistema
+            y los parámetros necesarios para el análisis.
+
+        pop_size (int):
+            Tamaño de la población en cada generación.
+
+        generations (int):
+            Número máximo de generaciones a ejecutar.
+
+        crossover_rate (float):
+            Probabilidad de cruce entre individuos.
+
+        mutation_rate (float):
+            Probabilidad de mutación de bits en los individuos.
+
+        elitism (int):
+            Número de individuos élite que se preservan en cada generación.
+
+        patience (int):
+            Número de generaciones sin mejora antes de detener el algoritmo (early stopping).
+
+        verbose (bool):
+            Si es True, imprime información detallada durante la ejecución.
+
+    Attributes:
+    ----------
+        N (int):
+            Número total de nodos en el sistema (futuros + presentes).
+
+        m (int):
+            Número de nodos en el conjunto de futuros.
+
+        dists_ref (np.ndarray):
+            Distribución de referencia utilizada para calcular la pérdida de información.
+
+        indices_futuro (np.ndarray):
+            Índices de los nodos en el conjunto de futuros.
+
+        indices_presente (np.ndarray):
+            Índices de los nodos en el conjunto de presentes.
+
+        vertices (List[Tuple[int, int]]):
+            Lista de vértices que representan los nodos del sistema.
+
+        _cache (dict):
+            Caché para almacenar los valores de fitness ya calculados.
+
+        logger:
+            Instancia del logger configurada para el análisis GA.
+
+    Methods:
+    -------
+        nodes_complement(seleccion):
+            Retorna la lista de nodos no seleccionados en la partición.
+
+        aplicar_estrategia(condiciones, alcance, mecanismo):
+            Ejecuta el algoritmo genético para encontrar la partición óptima.
+
+        ...
     """
+
     def __init__(
         self,
         gestor: Manager,
@@ -30,12 +97,24 @@ class GeneticGA(SIA):
         patience: int = 10,
         verbose: bool = False,
     ):
+        """
+        Inicializa la clase GeneticGA con los parámetros del algoritmo genético.
+
+        Args:
+            gestor (Manager): Gestor del sistema.
+            pop_size (int): Tamaño de la población.
+            generations (int): Número máximo de generaciones.
+            crossover_rate (float): Tasa de cruce.
+            mutation_rate (float): Tasa de mutación.
+            elitism (int): Número de individuos élite.
+            patience (int): Generaciones sin mejora antes de detener.
+            verbose (bool): Si es True, imprime información detallada.
+        """
         super().__init__(gestor)
-        # Session name sanitized for Windows
         session_name = f"{NET_LABEL}{len(gestor.estado_inicial)}{gestor.pagina}_GA"
         profiler_manager.start_session(session_name)
 
-        # GA hyperparameters
+        # Parámetros del algoritmo genético
         self.pop_size = pop_size
         self.generations = generations
         self.crossover_rate = crossover_rate
@@ -44,22 +123,28 @@ class GeneticGA(SIA):
         self.patience = patience
         self.verbose = verbose
 
-        # State initialized in aplicar_estrategia
+        # Estado inicializado en aplicar_estrategia
         self.N: int = 0
         self.m: int = 0
         self.dists_ref: np.ndarray = None  # type: ignore
         self.indices_futuro: np.ndarray = None  # type: ignore
         self.indices_presente: np.ndarray = None  # type: ignore
-        self.vertices: List[Tuple[int,int]] = []
+        self.vertices: List[Tuple[int, int]] = []
 
-        # Cache for evaluated individuals
+        # Caché para individuos evaluados
         self._cache: dict = {}
 
         self.logger = SafeLogger(GA_STRATEGY_TAG)
 
-    def nodes_complement(self, seleccion: List[Tuple[int,int]]) -> List[Tuple[int,int]]:
+    def nodes_complement(self, seleccion: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
         """
         Retorna la lista de nodos (tiempo, índice) no seleccionados.
+
+        Args:
+            seleccion (List[Tuple[int, int]]): Lista de nodos seleccionados.
+
+        Returns:
+            List[Tuple[int, int]]: Lista de nodos no seleccionados.
         """
         return [v for v in self.vertices if v not in seleccion]
 
@@ -70,6 +155,17 @@ class GeneticGA(SIA):
         alcance: str,
         mecanismo: str,
     ) -> Solution:
+        """
+        Ejecuta el algoritmo genético para encontrar la partición óptima.
+
+        Args:
+            condiciones (str): Condiciones iniciales del sistema.
+            alcance (str): Alcance del sistema.
+            mecanismo (str): Mecanismo del sistema.
+
+        Returns:
+            Solution: Solución con la partición óptima encontrada.
+        """
         # 1) Preparar subsistema
         self.sia_preparar_subsistema(condiciones, alcance, mecanismo)
         futuros = self.sia_subsistema.indices_ncubos
