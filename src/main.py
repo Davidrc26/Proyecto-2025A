@@ -11,24 +11,17 @@ def iniciar():
     # 2) Crear el gestor del sistema
     gestor_sistema = Manager(estado_inicial)
 
-    # 3) Parámetros para el GA
-    pop_size      = 100     # tamaño de población
-    generations   = 200     # número de generaciones
-    crossover_rate = 0.8
-    mutation_rate  = 0.01
-    elitism        = 2
-    verbose        = True   # para ver el progreso
-
     # 4) Instanciar y ejecutar el GA
     ga = GeneticGA(
-        gestor=gestor_sistema,
-        pop_size=pop_size,
-        generations=generations,
-        crossover_rate=crossover_rate,
-        mutation_rate=mutation_rate,
-        elitism=elitism,
-        verbose=verbose
-    )
+    gestor=gestor_sistema,
+    pop_size=30,
+    generations=70,
+    crossover_rate=0.7,
+    mutation_rate=0.05,
+    elitism=1,
+    verbose=True
+)
+
     resultado_ga = ga.aplicar_estrategia(condiciones, alcance, mecanismo)
 
     # 5) Mostrar resultados
