@@ -30,3 +30,9 @@ QNODES_ANALYSIS_TAG: str = f"{QNODES_LABEL}_analysis"
 ACO_LABEL: str = "ACO"
 ACO_STRAREGY_TAG: str = f"{ACO_LABEL}_strategy"
 ACO_ANALYSIS_TAG: str = f"{ACO_LABEL}_analysis"
+
+#Genetic Algorithm
+GA_LABEL: str = "GeneticAlgorithm"
+GA_STRAREGY_TAG: str = f"{GA_LABEL}_strategy"
+GA_ANALYSIS_TAG: str = f"{GA_LABEL}_analysis"
+GA_STRATEGY_TAG: str = f"{GA_LABEL}_strategy"

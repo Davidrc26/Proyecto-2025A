@@ -1,192 +1,163 @@
 import time
 import numpy as np
 
+from src.funcs.base import emd_efecto
 from src.models.base.sia import SIA
 from src.models.core.solution import Solution
 from src.constants.models import ACO_LABEL
-from src.constants.base import TYPE_TAG
-from src.middlewares.profile import profile
-
 
 class ACO(SIA):
-    """Ant Colony Optimization (ACO) algorithm."""
+    """Ant Colony Optimization (ACO) for network bipartitioning, with enhanced heuristics and local search."""
 
-    def __init__(self, gestor, num_hormigas: int, alpha: float, beta: float,
-                 rho: float, iteraciones: int):
-        """
-        Inicializa el algoritmo ACO.
-
-        Args:
-            gestor (Manager): Gestor del sistema.
-            num_hormigas (int): Número de hormigas.
-            alpha (float): Influencia de la feromona.
-            beta (float): Influencia de la heurística.
-            rho (float): Tasa de evaporación de la feromona.
-            iteraciones (int): Número de iteraciones.
-        """
+    def __init__(self, gestor, num_hormigas=50, alpha=1.0, beta=2.0,
+                 rho=0.05, iteraciones=200, Q=1.0, epsilon=1e-9, verbose=False):
         super().__init__(gestor)
         self.num_hormigas = num_hormigas
         self.alpha = alpha
         self.beta = beta
         self.rho = rho
         self.iteraciones = iteraciones
+        self.Q = Q
+        self.epsilon = epsilon
+        self.verbose = verbose
 
-        # Se inicializarán en aplicar_estrategia
-        self.feromonas = None
-        self.mejor_particion = None
-        self.mejor_perdida = float('inf')
+        # Se inicializan tras preparar subsistema:
+        self.N = None               # total de nodos (m + n)
+        self.m = None               # dimensión futuro
+        self.tau = None             # feromonas shape (N, 2)
+        self.eta = None             # heurística shape (N, 2)
+        self.dists_ref = None       # distribución de referencia
+        self.indices_futuro = None  # m indices
+        self.indices_presente = None# n indices
 
-    def inicializar_feromonas(self, num_nodos: int):
-        """Inicializa la matriz de feromonas NxN."""
-        self.feromonas = np.ones((num_nodos, num_nodos), dtype=float)
+    def inicializar_parametros(self):
+        # Tau y eta iniciales uniformes
+        self.tau = np.ones((self.N, 2), dtype=float)
+        self.eta = np.ones((self.N, 2), dtype=float)
+        # Heurística informada: EMD individual para asignar el nodo i al grupo 1
+        for i in range(self.N):
+            if i < self.m:
+                subalcance = np.array([self.indices_futuro[i]], dtype=np.int8)
+                submecanismo = np.array([], dtype=np.int8)
+            else:
+                subalcance = np.array([], dtype=np.int8)
+                submecanismo = np.array([self.indices_presente[i - self.m]], dtype=np.int8)
+            part = self.sia_subsistema.bipartir(subalcance, submecanismo)
+            dist = part.distribucion_marginal()
+            emd = emd_efecto(dist, self.dists_ref)
+            self.eta[i, 1] = 1.0 / (emd + self.epsilon)
 
-    def calcular_probabilidades(self, nodo_actual: int, nodos_disponibles: list,
-                                heuristica: np.ndarray):
-        """
-        Calcula las probabilidades de transición para las hormigas.
+    def construir_particion(self):
+        """Construye una partición (bits) asignando cada nodo a grupo 0 o 1."""
+        bits = np.zeros(self.N, dtype=np.int8)
+        for i in range(self.N):
+            w0 = self.tau[i, 0] ** self.alpha * self.eta[i, 0] ** self.beta
+            w1 = self.tau[i, 1] ** self.alpha * self.eta[i, 1] ** self.beta
+            total = w0 + w1
+            p0 = w0 / total if total > 0 else 0.5
+            bits[i] = np.random.choice([0, 1], p=[p0, 1 - p0])
+        # Evitar partición trivial
+        if bits.sum() == 0 or bits.sum() == self.N:
+            flip = np.random.randint(0, self.N)
+            bits[flip] = 1 - bits[flip]
+        return bits
 
-        Args:
-            nodo_actual (int): Nodo actual de la hormiga.
-            nodos_disponibles (list): Nodos que aún no han sido visitados.
-            heuristica (np.ndarray): Matriz de heurística.
+    def actualizar_feromonas(self, soluciones, costos, best_bits_global, best_phi_global):
+        """Evaporación y refuerzo de la feromona."""
+        # Evaporar
+        self.tau *= (1 - self.rho)
+        # Depositar por la mejor hormiga local
+        idx_mejor = int(np.argmin(costos))
+        mejor_bits = soluciones[idx_mejor]
+        mejor_costo = costos[idx_mejor]
+        delta = self.Q / (mejor_costo + self.epsilon)
+        for i, g in enumerate(mejor_bits):
+            self.tau[i, g] += delta
+        # Depósito elitista global
+        delta_g = self.Q / (best_phi_global + self.epsilon)
+        for i, g in enumerate(best_bits_global):
+            self.tau[i, g] += delta_g
 
-        Returns:
-            list: Probabilidades de transición.
-        """
-        probs = []
-        for nodo in nodos_disponibles:
-            tau = self.feromonas[nodo_actual, nodo]
-            eta = heuristica[nodo_actual, nodo]
-            probs.append((tau ** self.alpha) * (eta ** self.beta))
-        total = sum(probs)
-        return [p / total for p in probs] if total > 0 else [1/len(probs)]*len(probs)
+    def compute_phi_dist(self, bits):
+        """Calcula φ y la distribución marginal para un vector de bits."""
+        subalcance = np.where(bits[:self.m] == 1)[0]
+        submecanismo = np.where(bits[self.m:] == 1)[0]
+        part = self.sia_subsistema.bipartir(
+            np.array(subalcance, dtype=np.int8),
+            np.array(submecanismo, dtype=np.int8)
+        )
+        dist = part.distribucion_marginal()
+        phi = emd_efecto(dist, self.dists_ref)
+        return phi, dist
 
-    def construir_solucion(self, heuristica: np.ndarray):
-        """
-        Construye una solución (recorrido) para una hormiga.
+    def local_search(self, bits):
+        """Mejora localmente la partición invirtiendo bits para reducir φ."""
+        phi, dist = self.compute_phi_dist(bits)
+        improved = True
+        while improved:
+            improved = False
+            for i in range(self.N):
+                bits[i] ^= 1  # flip
+                new_phi, new_dist = self.compute_phi_dist(bits)
+                if new_phi < phi:
+                    phi, dist = new_phi, new_dist
+                    improved = True
+                else:
+                    bits[i] ^= 1  # revert
+        return bits, phi, dist
 
-        Args:
-            heuristica (np.ndarray): Matriz de heurística.
-
-        Returns:
-            list: Secuencia de nodos visitados.
-        """
-        num_nodos = heuristica.shape[0]
-        solucion = []
-        nodos_disponibles = list(range(num_nodos))
-        # Elige nodo inicial al azar
-        nodo_actual = np.random.choice(nodos_disponibles)
-        solucion.append(nodo_actual)
-        nodos_disponibles.remove(nodo_actual)
-
-        while nodos_disponibles:
-            probs = self.calcular_probabilidades(nodo_actual,
-                                                 nodos_disponibles,
-                                                 heuristica)
-            nodo_siguiente = np.random.choice(nodos_disponibles, p=probs)
-            solucion.append(nodo_siguiente)
-            nodos_disponibles.remove(nodo_siguiente)
-            nodo_actual = nodo_siguiente
-
-        return solucion
-
-    def actualizar_feromonas(self, soluciones: list, costos: list):
-        """
-        Actualiza la matriz de feromonas: evaporación y refuerzo.
-
-        Args:
-            soluciones (list): Lista de recorridos de hormigas.
-            costos (list): Costos asociados a cada recorrido.
-        """
-        # Evaporación
-        self.feromonas *= (1 - self.rho)
-
-        # Refuerzo: cada hormiga deposita en su recorrido
-        for sol, costo in zip(soluciones, costos):
-            delta = 1.0 / (costo + 1e-9)
-            for i in range(len(sol) - 1):
-                u, v = sol[i], sol[i+1]
-                self.feromonas[u, v] += delta
-                self.feromonas[v, u] += delta
-
-    @profile(context={TYPE_TAG: ACO_LABEL})
-    def aplicar_estrategia(self, condiciones: str,
-                           alcance: str,
-                           mecanismo: str) -> Solution:
-        """
-        Aplica la estrategia ACO para encontrar una buena bipartición.
-
-        Args:
-            condiciones (str): Condiciones iniciales.
-            alcance (str): Alcance del sistema.
-            mecanismo (str): Mecanismo del sistema.
-
-        Returns:
-            Solution: Solución con la mejor bipartición encontrada.
-        """
+    def aplicar_estrategia(self, condiciones, alcance, mecanismo) -> Solution:
+        """Aplica ACO con heurística avanzada y búsqueda local."""
         # 1) Preparar el subsistema
         self.sia_preparar_subsistema(condiciones, alcance, mecanismo)
-
-        # 2) Determinar N = m + n
         futuros = self.sia_subsistema.indices_ncubos
         presentes = self.sia_subsistema.dims_ncubos
-        m, n = futuros.size, presentes.size
-        N = m + n
+        self.m = futuros.size
+        n = presentes.size
+        self.N = self.m + n
+        self.indices_futuro = futuros
+        self.indices_presente = presentes
+        self.dists_ref = self.sia_dists_marginales
 
-        # 3) Inicializar estructura ACO
-        self.inicializar_feromonas(N)
-        heuristica = np.random.rand(N, N)
+        # 2) Inicializar ACO
+        self.inicializar_parametros()
 
-        # 4) Bucle principal de iteraciones
-        for _ in range(self.iteraciones):
-            rutas = []
-            costos = []
+        best_phi = float('inf')
+        best_bits = None
+        best_dist = None
+        start_time = time.time()
+
+        # 3) Bucle principal
+        for t in range(self.iteraciones):
+            soluciones, costos = [], []
             for _ in range(self.num_hormigas):
-                ruta = self.construir_solucion(heuristica)
-                costo = self.calcular_costo(ruta)
-                rutas.append(ruta)
-                costos.append(costo)
-                # Actualizar mejor global
-                if costo < self.mejor_perdida:
-                    self.mejor_perdida = costo
-                    self.mejor_particion = ruta
+                bits = self.construir_particion()
+                bits, phi, dist = self.local_search(bits)
+                soluciones.append(bits.copy())
+                costos.append(phi)
+                if phi < best_phi:
+                    best_phi, best_bits, best_dist = phi, bits.copy(), dist
+            # Actualizar feromonas con elitismo
+            self.actualizar_feromonas(soluciones, costos, best_bits, best_phi)
+            if self.verbose:
+                print(f"Iter {t+1}/{self.iteraciones}: best_phi = {best_phi:.6f}")
 
-            self.actualizar_feromonas(rutas, costos)
+        # 4) Formatear partición óptima
+        grupos = []
+        for i in range(self.N):
+            if best_bits[i] == 1:
+                if i < self.m:
+                    grupos.append((1, int(futuros[i])))
+                else:
+                    grupos.append((0, int(presentes[i - self.m])))
+        particion_str = " ".join(f"({t},{idx})" for t, idx in grupos)
 
-        # 5) Formatear la mejor partición encontrada
-        particion_formateada = self.formatear_particion(self.mejor_particion)
-
-        # 6) Devolver resultado
+        # 5) Devolver Solution
         return Solution(
             estrategia=ACO_LABEL,
-            perdida=self.mejor_perdida,
+            perdida=best_phi,
             distribucion_subsistema=self.sia_dists_marginales,
-            distribucion_particion=self.sia_subsistema.distribucion_marginal(),
-            tiempo_total=time.time() - self.sia_tiempo_inicio,
-            particion=particion_formateada,
+            distribucion_particion=best_dist,
+            tiempo_total=time.time() - start_time,
+            particion=particion_str,
         )
-
-    def calcular_costo(self, solucion: list) -> float:
-        """
-        Calcula el costo de una solución.
-
-        Args:
-            solucion (list): Recorrido de la hormiga.
-
-        Returns:
-            float: Costo asociado (reemplazar con lógica real).
-        """
-        # TODO: Implementar función de costo real usando tu métrica EMD
-        return np.random.random()
-
-    def formatear_particion(self, particion: list) -> str:
-        """
-        Formatea la partición (lista de nodos) para su representación.
-
-        Args:
-            particion (list): Lista de índices de nodos.
-
-        Returns:
-            str: Texto con la partición.
-        """
-        return " ".join(map(str, particion))
