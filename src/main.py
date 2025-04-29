@@ -3,22 +3,22 @@ from src.controllers.strategies.GeneticGA import GeneticGA
 def iniciar():
     """Punto de entrada para probar la metaheurística genética"""
     # 1) Configuración inicial
-    estado_inicial = "1000000000"
-    condiciones    = "1111111111"
-    alcance        = "1111111111"
-    mecanismo      = "1111111111"
+    estado_inicial = "10000000000000000000"
+    condiciones =    "11111111111111111111"
+    alcance =        "11111111111111111111"
+    mecanismo =      "11111111111111111111"
 
     # 2) Crear el gestor del sistema
     gestor_sistema = Manager(estado_inicial)
 
-    # 4) Instanciar y ejecutar el GA
     ga = GeneticGA(
     gestor=gestor_sistema,
-    pop_size=30,
-    generations=70,
-    crossover_rate=0.7,
-    mutation_rate=0.05,
-    elitism=1,
+    pop_size=150,
+    generations=300,
+    crossover_rate=0.8,
+    mutation_rate=0.1,
+    elitism=2,
+    patience=25,
     verbose=True
 )
 
