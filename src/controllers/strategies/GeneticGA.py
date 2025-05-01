@@ -84,6 +84,7 @@ class GeneticGA(SIA):
     ) -> Solution:
         # Preparar subsistema
         self.sia_preparar_subsistema(condiciones, alcance, mecanismo)
+        
         futuros = self.sia_subsistema.indices_ncubos
         presentes = self.sia_subsistema.dims_ncubos
         self.m = futuros.size
