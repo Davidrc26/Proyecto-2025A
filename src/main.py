@@ -15,14 +15,11 @@ def iniciar():
     # 2) Crear el gestor del sistema
     gestor_sistema = Manager(estado_inicial)
 
-    analisis = QNodes(gestor_sistema)
+    analisis = GeneticGA(gestor_sistema,pop_size=len(estado_inicial))
 
     sia = analisis.aplicar_estrategia(condiciones, alcance, mecanismo)
 
-    print("Resultado de QNodes:")
-    print(f"  Estrategia: {sia.estrategia}")
-    print(f"  Pérdida (φ): {sia.perdida:.6f}")
-    print(f"  Partición: {sia.particion}")
+    print(sia)
 #     ga = GeneticGA(
 #     gestor=gestor_sistema,
 #     pop_size=150,

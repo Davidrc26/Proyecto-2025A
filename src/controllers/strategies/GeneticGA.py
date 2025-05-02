@@ -1,7 +1,6 @@
 import time
 import numpy as np
 from typing import List, Tuple
-from multiprocessing import Pool
 
 from src.middlewares.slogger import SafeLogger
 from src.middlewares.profile import profiler_manager, profile
@@ -16,14 +15,14 @@ from src.models.core.solution import Solution
 
 class GeneticGA(SIA):
     """
-    Algoritmo Genético optimizado para encontrar particiones pequeñas y eficientes.
+    Algoritmo Genético optimizado sin multihilos para facilitar el debug.
     """
 
     def __init__(
         self,
         gestor: Manager,
-        pop_size: int = 50,
-        generations: int = 100,
+        pop_size: int,
+        generations: int = 10,
         crossover_rate: float = 0.7,
         mutation_rate: float = 0.05,
         elitism: int = 1,
@@ -99,7 +98,7 @@ class GeneticGA(SIA):
         poblacion = np.zeros((self.pop_size, self.N), dtype=np.int8)
         for i in range(self.pop_size):
             if np.random.rand() < 0.7:
-                k = np.random.choice([1, 2, 3])
+                k = np.random.choice([1, 2])
                 idx = np.random.choice(self.N, k, replace=False)
                 poblacion[i, idx] = 1
             else:
@@ -111,90 +110,93 @@ class GeneticGA(SIA):
 
         no_improve = 0
         prev_phi = best_phi
-        pool = Pool(processes=8)
 
-        try:
-            for gen in range(self.generations):
-                keys = [tuple(ind.tolist()) for ind in poblacion]
-                fitness_vals = pool.map(self._evaluar_individuo, keys)
-                fitness_vals = np.array(fitness_vals)
+        # Bucle principal sin hilos
+        for gen in range(self.generations):
+            keys = [tuple(ind.tolist()) for ind in poblacion]
+            fitness_vals = np.array([self._evaluar_individuo(key) for key in keys])
 
-                gen_best_idx = np.argmax(fitness_vals)
-                gen_best_fitness = fitness_vals[gen_best_idx]
-                if -gen_best_fitness < best_phi:
-                    best_phi = -gen_best_fitness
-                    best_ind = poblacion[gen_best_idx].copy()
+            gen_best_idx = np.argmax(fitness_vals)
+            if -fitness_vals[gen_best_idx] < best_phi:
+                best_phi = -fitness_vals[gen_best_idx]
+                best_ind = poblacion[gen_best_idx].copy()
 
+            if self.verbose:
+                self.logger.info(f"Gen {gen+1}/{self.generations}: best_phi={best_phi:.6f}")
+
+            # Early stopping por mejora mínima
+            if abs(prev_phi - best_phi) < 1e-5:
                 if self.verbose:
-                    self.logger.info(f"Gen {gen+1}/{self.generations}: best_phi={best_phi:.6f}")
+                    self.logger.info(f"Early stop por mejora mínima en generación {gen+1}")
+                break
 
-                # Early stopping por mejora mínima
-                if abs(prev_phi - best_phi) < 1e-5:
+            # Early stopping normal
+            if best_phi < prev_phi:
+                no_improve = 0
+                prev_phi = best_phi
+            else:
+                no_improve += 1
+                if no_improve >= self.patience:
                     if self.verbose:
-                        self.logger.info(f"Early stop por mejora mínima en generación {gen+1}")
+                        self.logger.info(f"Early stop por paciencia en generación {gen+1}")
                     break
 
-                # Early stopping normal
-                if best_phi < prev_phi:
-                    no_improve = 0
-                    prev_phi = best_phi
-                else:
-                    no_improve += 1
-                    if no_improve >= self.patience:
-                        if self.verbose:
-                            self.logger.info(f"Early stop por paciencia en generación {gen+1}")
-                        break
+            # Reducción dinámica de población
+            if no_improve >= self.patience // 2 and poblacion.shape[0] > 10:
+                new_size = max(poblacion.shape[0] // 2, 10)
+                poblacion = poblacion[:new_size]
+                fitness_vals = fitness_vals[:new_size]
+                self.pop_size = new_size
 
-                # Reducción dinámica de población
-                if no_improve >= self.patience // 2 and self.pop_size > 10:
-                    self.pop_size = max(self.pop_size // 2, 10)
-                    poblacion = poblacion[:self.pop_size]
-                    fitness_vals = fitness_vals[:self.pop_size]
+            # Torneo
+            padres = np.empty_like(poblacion)
+            for i in range(self.pop_size):
+                a, b = np.random.choice(self.pop_size, 2, replace=False)
+                padres[i] = poblacion[a] if fitness_vals[a] > fitness_vals[b] else poblacion[b]
 
-                # Torneo
-                padres = np.empty_like(poblacion)
-                for i in range(self.pop_size):
-                    a, b = np.random.choice(self.pop_size, 2, replace=False)
-                    padres[i] = poblacion[a] if fitness_vals[a] > fitness_vals[b] else poblacion[b]
+            # Cruce y mutación
+            hijos = padres.copy()
+            for i in range(0, self.pop_size - 1, 2):
+                if np.random.rand() < self.crossover_rate:
+                    pt = np.random.randint(1, self.N)
+                    hijos[i, :pt], hijos[i+1, :pt] = padres[i+1, :pt].copy(), padres[i, :pt].copy()
+            for i in range(self.pop_size):
+                if np.random.rand() < 0.5:
+                    flip_count = np.random.choice([1, 2])
+                    idx_to_flip = np.random.choice(self.N, size=flip_count, replace=False)
+                    hijos[i, idx_to_flip] = 1 - hijos[i, idx_to_flip]
 
-                # Cruce
-                hijos = padres.copy()
-                for i in range(0, self.pop_size - 1, 2):
-                    if np.random.rand() < self.crossover_rate:
-                        pt = np.random.randint(1, self.N)
-                        hijos[i, :pt], hijos[i+1, :pt] = padres[i+1, :pt].copy(), padres[i, :pt].copy()
+            # Elitismo
+            elite_idx = np.argsort(fitness_vals)[-self.elitism:]
+            elites = poblacion[elite_idx]
+            poblacion = hijos
+            poblacion[:self.elitism] = elites
 
-                # Mutación localizada
-                for i in range(self.pop_size):
-                    if np.random.rand() < 0.5:
-                        flip_count = np.random.choice([1, 2])
-                        idx_to_flip = np.random.choice(self.N, size=flip_count, replace=False)
-                        hijos[i, idx_to_flip] = 1 - hijos[i, idx_to_flip]
+        # Construir partición y distribución resultante
+        subalcance = np.where(best_ind[:self.m] == 1)[0]
+        submecanismo = np.where(best_ind[self.m:] == 1)[0]
+        part = self.sia_subsistema.bipartir(
+            np.array(subalcance, dtype=np.int8),
+            np.array(submecanismo, dtype=np.int8)
+        )
+        dist = part.distribucion_marginal()
+        dist /= dist.sum()
 
-                # Elitismo
-                elite_idx = np.argsort(fitness_vals)[-self.elitism:]
-                elites = poblacion[elite_idx]
-                poblacion = hijos
-                poblacion[:self.elitism] = elites
-
-        finally:
-            pool.close()
-            pool.join()
-
-        # Construir partición
         seleccion = []
         for i in range(self.N):
             if best_ind[i] == 1:
-                seleccion.append((1, int(self.indices_futuro[i])) if i < self.m else
-                                  (0, int(self.indices_presente[i - self.m])))
+                seleccion.append(
+                    (1, int(self.indices_futuro[i])) if i < self.m else
+                    (0, int(self.indices_presente[i - self.m]))
+                )
         complemento = self.nodes_complement(seleccion)
         particion_str = fmt_biparte_q(seleccion, complemento)
 
         return Solution(
             estrategia=GA_LABEL,
             perdida=best_phi,
-            distribucion_subsistema=self.sia_dists_marginales,
-            distribucion_particion=None,
+            distribucion_subsistema=self.dists_ref,
+            distribucion_particion=dist,
             tiempo_total=time.time() - start_time,
             particion=particion_str,
         )
