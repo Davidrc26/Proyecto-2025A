@@ -83,7 +83,7 @@ class GeneticGA(SIA):
     ) -> Solution:
         # Preparar subsistema
         self.sia_preparar_subsistema(condiciones, alcance, mecanismo)
-        
+        print("aqui comienza")
         futuros = self.sia_subsistema.indices_ncubos
         presentes = self.sia_subsistema.dims_ncubos
         self.m = futuros.size
@@ -113,7 +113,9 @@ class GeneticGA(SIA):
 
         # Bucle principal sin hilos
         for gen in range(self.generations):
+            print(f"Generación {gen+1}/{self.generations}")
             keys = [tuple(ind.tolist()) for ind in poblacion]
+
             fitness_vals = np.array([self._evaluar_individuo(key) for key in keys])
 
             gen_best_idx = np.argmax(fitness_vals)
@@ -180,7 +182,6 @@ class GeneticGA(SIA):
             np.array(submecanismo, dtype=np.int8)
         )
         dist = part.distribucion_marginal()
-        dist /= dist.sum()
 
         seleccion = []
         for i in range(self.N):
@@ -191,7 +192,9 @@ class GeneticGA(SIA):
                 )
         complemento = self.nodes_complement(seleccion)
         particion_str = fmt_biparte_q(seleccion, complemento)
+        
 
+        print("ya termine")
         return Solution(
             estrategia=GA_LABEL,
             perdida=best_phi,
