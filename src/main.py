@@ -7,15 +7,17 @@ from src.controllers.strategies.q_nodes import QNodes
 def iniciar():
     """Punto de entrada para probar la metaheurística genética"""
     # 1) Configuración inicial
-    estado_inicial = "10000000000000000000"
-    condiciones =    "11111111111111111111"
-    alcance =        "11111111111111111111"
-    mecanismo =      "11111111111111111111"
+    estado_inicial = "1000000000"
+    condiciones =    "1111111111"
+    alcance =        "1010101010"
+    mecanismo =      "1010101010"
 
     # 2) Crear el gestor del sistema
     gestor_sistema = Manager(estado_inicial)
 
-    analisis = GeneticGA(gestor_sistema,pop_size=len(estado_inicial))
+    analisis = GeneticGA(gestor_sistema,len(estado_inicial))
+
+    #analisis = BruteForce(gestor_sistema)
 
     sia = analisis.aplicar_estrategia(condiciones, alcance, mecanismo)
 

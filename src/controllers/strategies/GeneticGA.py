@@ -16,6 +16,7 @@ from src.models.core.solution import Solution
 class GeneticGA(SIA):
     """
     Algoritmo Genético optimizado sin multihilos para facilitar el debug.
+    Se rastrea el mejor global correctamente para evitar pérdida cero.
     """
 
     def __init__(
@@ -47,7 +48,7 @@ class GeneticGA(SIA):
         self.indices_futuro: np.ndarray = None  # type: ignore
         self.indices_presente: np.ndarray = None  # type: ignore
         self.vertices: List[Tuple[int, int]] = []
-        self._cache: dict = {}
+        self._cache: dict = {}  # caché de fitness
 
         self.logger = SafeLogger(GA_STRATEGY_TAG)
 
@@ -56,22 +57,25 @@ class GeneticGA(SIA):
 
     def _evaluar_individuo(self, key: Tuple[int]) -> float:
         ind = np.array(key, dtype=np.int8)
-        ones = ind.sum()
-        if ones == 0 or ones == self.N:
+        count = ind.sum()
+        if count == 0 or count == self.N:
             return -1e9
-
         phi = self._cache.get(key)
         if phi is None:
             subalcance = np.where(ind[:self.m] == 1)[0]
             submecanismo = np.where(ind[self.m:] == 1)[0]
+            real_alcance = self.indices_futuro[subalcance]
+            real_mecanismo = self.indices_presente[submecanismo]
+            seleccion_debug = [(1, int(idx)) for idx in real_alcance] + [(0, int(idx)) for idx in real_mecanismo]
+            print(f"Evaluando partición: {fmt_biparte_q(seleccion_debug, self.nodes_complement(seleccion_debug))}")
             part = self.sia_subsistema.bipartir(
-                np.array(subalcance, dtype=np.int8),
-                np.array(submecanismo, dtype=np.int8)
+                np.array(real_alcance, dtype=np.int8),
+                np.array(real_mecanismo, dtype=np.int8)
             )
             dist = part.distribucion_marginal()
             phi = emd_efecto(dist, self.dists_ref)
+            print(phi)
             self._cache[key] = phi
-
         return -phi
 
     @profile(context={TYPE_TAG: GA_LABEL})
@@ -81,7 +85,6 @@ class GeneticGA(SIA):
         alcance: str,
         mecanismo: str,
     ) -> Solution:
-        # Preparar subsistema
         self.sia_preparar_subsistema(condiciones, alcance, mecanismo)
         print("aqui comienza")
         futuros = self.sia_subsistema.indices_ncubos
@@ -94,7 +97,6 @@ class GeneticGA(SIA):
         self.dists_ref = self.sia_dists_marginales
         self.vertices = [(1, int(idx)) for idx in futuros] + [(0, int(idx)) for idx in presentes]
 
-        # Inicialización sesgada de población
         poblacion = np.zeros((self.pop_size, self.N), dtype=np.int8)
         for i in range(self.pop_size):
             if np.random.rand() < 0.7:
@@ -104,95 +106,76 @@ class GeneticGA(SIA):
             else:
                 poblacion[i] = np.random.randint(0, 2, size=self.N, dtype=np.int8)
 
-        best_phi = float('inf')
-        best_ind = np.zeros(self.N, dtype=np.int8)
         start_time = time.time()
-
         no_improve = 0
-        prev_phi = best_phi
+        prev_phi = float('inf')
+        global_best_phi = float('inf')
+        global_best_key = None
 
-        # Bucle principal sin hilos
         for gen in range(self.generations):
             print(f"Generación {gen+1}/{self.generations}")
             keys = [tuple(ind.tolist()) for ind in poblacion]
+            unique_keys = list(dict.fromkeys(keys))
+            unique_fitness = {k: self._evaluar_individuo(k) for k in unique_keys}
+            fitness_vals = np.array([unique_fitness[k] for k in keys])
 
-            fitness_vals = np.array([self._evaluar_individuo(key) for key in keys])
+            for k, f in unique_fitness.items():
+                phi_val = -f
+                if phi_val < global_best_phi:
+                    global_best_phi = phi_val
+                    global_best_key = k
 
-            gen_best_idx = np.argmax(fitness_vals)
-            if -fitness_vals[gen_best_idx] < best_phi:
-                best_phi = -fitness_vals[gen_best_idx]
-                best_ind = poblacion[gen_best_idx].copy()
-
+            gen_phi = min(-val for val in fitness_vals)
             if self.verbose:
-                self.logger.info(f"Gen {gen+1}/{self.generations}: best_phi={best_phi:.6f}")
-
-            # Early stopping por mejora mínima
-            if abs(prev_phi - best_phi) < 1e-5:
-                if self.verbose:
-                    self.logger.info(f"Early stop por mejora mínima en generación {gen+1}")
+                self.logger.info(f"Gen {gen+1}/{self.generations}: gen_phi={gen_phi:.6f}")
+            if abs(prev_phi - gen_phi) < 1e-5 or gen_phi >= prev_phi and no_improve >= self.patience:
+                print(f"Early stop en gen {gen+1}")
                 break
-
-            # Early stopping normal
-            if best_phi < prev_phi:
+            if gen_phi < prev_phi:
                 no_improve = 0
-                prev_phi = best_phi
+                prev_phi = gen_phi
             else:
                 no_improve += 1
-                if no_improve >= self.patience:
-                    if self.verbose:
-                        self.logger.info(f"Early stop por paciencia en generación {gen+1}")
-                    break
 
-            # Reducción dinámica de población
-            if no_improve >= self.patience // 2 and poblacion.shape[0] > 10:
-                new_size = max(poblacion.shape[0] // 2, 10)
-                poblacion = poblacion[:new_size]
-                fitness_vals = fitness_vals[:new_size]
-                self.pop_size = new_size
-
-            # Torneo
+            elite_idx = np.argsort(fitness_vals)[-self.elitism:]
+            elites = [poblacion[i].copy() for i in elite_idx]
             padres = np.empty_like(poblacion)
             for i in range(self.pop_size):
                 a, b = np.random.choice(self.pop_size, 2, replace=False)
                 padres[i] = poblacion[a] if fitness_vals[a] > fitness_vals[b] else poblacion[b]
-
-            # Cruce y mutación
             hijos = padres.copy()
-            for i in range(0, self.pop_size - 1, 2):
+            for i in range(0, self.pop_size-1, 2):
                 if np.random.rand() < self.crossover_rate:
                     pt = np.random.randint(1, self.N)
                     hijos[i, :pt], hijos[i+1, :pt] = padres[i+1, :pt].copy(), padres[i, :pt].copy()
             for i in range(self.pop_size):
-                if np.random.rand() < 0.5:
+                if np.random.rand() < self.mutation_rate:
                     flip_count = np.random.choice([1, 2])
-                    idx_to_flip = np.random.choice(self.N, size=flip_count, replace=False)
-                    hijos[i, idx_to_flip] = 1 - hijos[i, idx_to_flip]
+                    idxs = np.random.choice(self.N, size=flip_count, replace=False)
+                    hijos[i, idxs] = 1 - hijos[i, idxs]
+            poblacion = np.vstack((elites, hijos[self.elitism:]))
 
-            # Elitismo
-            elite_idx = np.argsort(fitness_vals)[-self.elitism:]
-            elites = poblacion[elite_idx]
-            poblacion = hijos
-            poblacion[:self.elitism] = elites
+        # Usar mejor global
+        if global_best_key is None:
+            best_ind = poblacion[0]
+            best_phi = -fitness_vals[0]
+        else:
+            best_ind = np.array(global_best_key, dtype=np.int8)
+            best_phi = global_best_phi
 
-        # Construir partición y distribución resultante
         subalcance = np.where(best_ind[:self.m] == 1)[0]
         submecanismo = np.where(best_ind[self.m:] == 1)[0]
         part = self.sia_subsistema.bipartir(
-            np.array(subalcance, dtype=np.int8),
-            np.array(submecanismo, dtype=np.int8)
+            np.array(self.indices_futuro[subalcance], dtype=np.int8),
+            np.array(self.indices_presente[submecanismo], dtype=np.int8)
         )
         dist = part.distribucion_marginal()
 
-        seleccion = []
-        for i in range(self.N):
-            if best_ind[i] == 1:
-                seleccion.append(
-                    (1, int(self.indices_futuro[i])) if i < self.m else
-                    (0, int(self.indices_presente[i - self.m]))
-                )
+        # Construir partición final
+        seleccion = [(1, int(idx)) for idx in self.indices_futuro[subalcance]] + \
+                    [(0, int(idx)) for idx in self.indices_presente[submecanismo]]
         complemento = self.nodes_complement(seleccion)
         particion_str = fmt_biparte_q(seleccion, complemento)
-        
 
         print("ya termine")
         return Solution(
