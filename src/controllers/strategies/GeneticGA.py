@@ -128,8 +128,9 @@ class GeneticGA(SIA):
             gen_phi = min(-val for val in fitness_vals)
             if self.verbose:
                 self.logger.info(f"Gen {gen+1}/{self.generations}: gen_phi={gen_phi:.6f}")
-            if abs(prev_phi - gen_phi) < 1e-5 or gen_phi >= prev_phi and no_improve >= self.patience:
-                print(f"Early stop en gen {gen+1}")
+            # Early stop sólo por paciencia (mayor exploración)
+            if no_improve >= self.patience:
+                print(f"Early stop por paciencia en gen {gen+1}")
                 break
             if gen_phi < prev_phi:
                 no_improve = 0
