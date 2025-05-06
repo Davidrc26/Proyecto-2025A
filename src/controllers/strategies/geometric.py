@@ -77,16 +77,27 @@ class GeometricSIA(SIA):
         )
 
     def _calcular_tabla_costos(self) -> dict:
-        """Construye T: dict variable->matrix[size x size] con costos t(i,j)."""
+        """
+        Top-down: para cada variable v, calculo sólo t(i,j) partiendo de i=0,
+        y dejo que la recursión explore todos los (k,j) necesarios.
+        """
         T = {}
         for v, nc in enumerate(self.sia_subsistema.ncubos):
             self._current_var = v
-            M = np.zeros((self.size, self.size), dtype=float)
             X = nc.data.flatten()
-            for i in range(self.size):
-                for j in range(self.size):
-                    M[i, j] = self._calcular_transicion_coste(i, j, X)
+            self._cost_cache.clear()
+
+            # Llamadas raíz: i = 0 contra todos los j
+            for j in range(self.size):
+                self._calcular_transicion_coste(0, j, X)
+
+            # Ahora la caché contiene t(0,j), t(k,j), t(...), vamos a volcarlo en M
+            M = np.zeros((self.size, self.size), dtype=float)
+            for (i, j, _), cost in self._cost_cache.items():
+                M[i, j] = cost
+
             T[v] = M
+
         return T
 
     def _calcular_transicion_coste(
