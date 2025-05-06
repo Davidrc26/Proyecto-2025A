@@ -14,6 +14,9 @@ def iniciar():
 
     ### Ejemplo de solución mediante módulo de fuerza bruta ###
     analizador_fb = GeometricSIA(gestor_sistema)
+    tabla = analizador_fb.generar_tabla_T(condiciones, alcance, mecanismo)
+    print(tabla)
+
     sia_uno = analizador_fb.aplicar_estrategia(
         condiciones,
         alcance,

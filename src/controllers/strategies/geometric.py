@@ -29,7 +29,6 @@ class GeometricSIA(SIA):
         session_name = f"{NET_LABEL}{len(gestor.estado_inicial)}{gestor.pagina}_GEOM"
         profiler_manager.start_session(session_name)
         self.logger = SafeLogger(GEOMETRIC_STRAREGY_TAG)
-        # Caché para costos t(i,j) por variable
         self._cost_cache = {}
 
     @profile(context={TYPE_TAG: GEOMETRIC_ANALYSIS_TAG})
@@ -39,26 +38,19 @@ class GeometricSIA(SIA):
         alcance: str,
         mecanismo: str
     ) -> Solution:
-        """
-        Ejecuta el algoritmo geométrico completo para encontrar la bipartición óptima.
-        """
-        # 1) Preparar subsistema con condicionamientos
+        # Preparar subsistema
         self.sia_preparar_subsistema(condiciones, alcance, mecanismo)
-
-        # Inicializar dimensiones y número de estados
+        # Inicializar dimensiones
         self.N = len(self.sia_gestor.estado_inicial)
         self.size = 1 << self.N
 
-        # 2) Calcular tabla de costos T[v][i][j]
+        # Calcular tabla de costos
         T = self._calcular_tabla_costos()
-
-        # 3) Identificar biparticiones candidatas
+        # Identificar candidatos
         candidates = self._identificar_candidatos(T)
 
-        # 4) Evaluar y seleccionar mejor bipartición
-        best = None
-        best_phi = np.inf
-        best_dist = None
+        # Evaluar candidatos
+        best, best_phi, best_dist = None, np.inf, None
         for sel in candidates:
             comp = [v for v in range(self.N) if v not in sel]
             part = self.sia_subsistema.bipartir(
@@ -68,13 +60,11 @@ class GeometricSIA(SIA):
             dist_p = part.distribucion_marginal()
             phi = emd_efecto(dist_p, self.sia_dists_marginales)
             if phi < best_phi:
-                best_phi = phi
-                best = sel
-                best_dist = dist_p
+                best_phi, best, best_dist = phi, sel, dist_p
 
-        # 5) Formatear solución
+        # Formatear partición
         seleccion = [(1, i) for i in best]
-        complemento = [(1, i) for i in comp]
+        complemento = [(1, i) for i in range(self.N) if i not in best]
         particion_str = fmt_biparte_q(seleccion, complemento)
 
         return Solution(
@@ -87,11 +77,10 @@ class GeometricSIA(SIA):
         )
 
     def _calcular_tabla_costos(self) -> dict:
-        """
-        Construye T: dict variable->matrix[size x size] con costos t(i,j).
-        """
+        """Construye T: dict variable->matrix[size x size] con costos t(i,j)."""
         T = {}
         for v, nc in enumerate(self.sia_subsistema.ncubos):
+            self._current_var = v
             M = np.zeros((self.size, self.size), dtype=float)
             X = nc.data.flatten()
             for i in range(self.size):
@@ -106,20 +95,20 @@ class GeometricSIA(SIA):
         j: int,
         X: np.ndarray
     ) -> float:
-        """
-        Calcula recursivamente t(i,j) según la ecuación 5.1.
-        X: vector de probabilidades para esta variable, longitud 2^n.
-        """
+        """Calcula recursivamente t(i,j) según la ecuación 5.1."""
         key = (i, j, id(X))
         if key in self._cost_cache:
             return self._cost_cache[key]
+
+        # Debug print indicando variable y transición
+        var_name = self.sia_subsistema.ncubos[self._current_var].indice
+        print(f"Variable {var_name}: calculando costo t({i}->{j}) para X de longitud {X.size}")
 
         d = hamming_distance(i, j)
         gamma = 2 ** (-d)
         base = abs(X[i] - X[j])
         sum_neighbors = 0.0
         if d > 1:
-            # vecinos que disminuyen distancia Hamming en 1
             for bit in range(self.N):
                 k = i ^ (1 << bit)
                 if hamming_distance(k, j) == d - 1:
@@ -130,16 +119,9 @@ class GeometricSIA(SIA):
         return cost
 
     def _identificar_candidatos(self, T: dict) -> list:
-        """
-        Genera biparticiones candidatas: todas las combinaciones no triviales.
-        Para n_vars grandes, se podría filtrar por costos extremos.
-        """
+        """Genera biparticiones candidatas: combinaciones no triviales."""
         n_vars = len(self.sia_subsistema.ncubos)
-        cands = []
-        for k in range(1, n_vars):
-            for combo in combinations(range(n_vars), k):
-                cands.append(combo)
-        return cands
+        return [combo for k in range(1, n_vars) for combo in combinations(range(n_vars), k)]
 
     def generar_tabla_T(
         self,
@@ -147,14 +129,8 @@ class GeometricSIA(SIA):
         alcance: str,
         mecanismo: str
     ) -> pd.DataFrame:
-        """
-        Genera la tabla T de costos t(i,j) para todas las variables.
-        Devuelve un DataFrame con multi-índice en columnas (variable, estado_j).
-        Filas indexadas por estado_i (little-endian).
-        """
-        # Asegurar subsistema preparado
+        """Genera DataFrame con T de transiciones."""
         self.sia_preparar_subsistema(condiciones, alcance, mecanismo)
-        # Recalcular dimensiones si es necesario
         self.N = len(self.sia_gestor.estado_inicial)
         self.size = 1 << self.N
 
@@ -162,7 +138,6 @@ class GeometricSIA(SIA):
         labels = [f"{i:0{self.N}b}" for i in range(self.size)]
         var_names = [nc.indice for nc in self.sia_subsistema.ncubos]
 
-        # Construir DataFrame
         panels = [T[v] for v in range(len(var_names))]
         data = np.hstack(panels)
         col_arrays = [
@@ -170,5 +145,4 @@ class GeometricSIA(SIA):
             labels * len(var_names)
         ]
         columns = pd.MultiIndex.from_arrays(col_arrays, names=["Variable", "Estado_j"])
-        df = pd.DataFrame(data, index=labels, columns=columns)
-        return df
+        return pd.DataFrame(data, index=labels, columns=columns)
