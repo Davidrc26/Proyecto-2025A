@@ -36,3 +36,11 @@ GA_LABEL: str = "GeneticAlgorithm"
 GA_STRAREGY_TAG: str = f"{GA_LABEL}_strategy"
 GA_ANALYSIS_TAG: str = f"{GA_LABEL}_analysis"
 GA_STRATEGY_TAG: str = f"{GA_LABEL}_strategy"
+
+
+#Geometric Algorithm
+
+GEOMETRIC_LABEL: str = "GeometricSIA"
+GEOMETRIC_STRAREGY_TAG: str = f"{GEOMETRIC_LABEL}_strategy"
+GEOMETRIC_ANALYSIS_TAG: str = f"{GEOMETRIC_LABEL}_analysis"
+GEOMETRIC_STRATEGY_TAG: str = f"{GEOMETRIC_LABEL}_strategy"
