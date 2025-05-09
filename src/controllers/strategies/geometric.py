@@ -1,3 +1,4 @@
+import time
 from typing import List, Tuple
 from src.constants.base import NET_LABEL, TYPE_TAG
 from src.constants.models import GEOMETRIC_ANALYSIS_TAG, GEOMETRIC_STRAREGY_TAG
@@ -38,11 +39,12 @@ class GeometricSIA(SIA):
     ) -> Solution:
         # --- 1) Preparo subsistema y calculo i0 ---
         self.sia_preparar_subsistema(condiciones, alcance, mecanismo)
-        
+
         self.N = len(self.sia_gestor.estado_inicial)
         # entero del estado inicial (bit-string → int)
         bits = "".join(str(b) for b in self.sia_gestor.estado_inicial)
         self.i0 = int(bits, 2)
+        start_time = time.time()
 
         # --- 2) Calculo sólo las distancias t(i0→j) para flips de 1 bit ---
         one_bit_states = [self.i0 ^ (1 << b) for b in range(self.N)]
@@ -104,7 +106,7 @@ class GeometricSIA(SIA):
             perdida=phi,
             distribucion_subsistema=self.sia_dists_marginales,
             distribucion_particion=dist,
-            tiempo_total=0.0,
+            tiempo_total=time.time() - start_time,
             particion=particion_str,
         )
 
