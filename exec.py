@@ -6,7 +6,7 @@ def main():
     """Inicializar el aplicativo."""
 
     aplicacion.profiler_habilitado = True
-    aplicacion.pagina_sample_network = "A"
+    aplicacion.pagina_sample_network = "C"
 
     iniciar()
 

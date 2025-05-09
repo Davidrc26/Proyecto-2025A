@@ -1,14 +1,14 @@
 from src.controllers.manager import Manager
 
 from src.controllers.strategies.geometric import GeometricSIA
-
+from src.controllers.strategies.q_nodes import QNodes
 def iniciar():
     """Punto de entrada principal"""
                     # ABCD #
-    estado_inicial = "100000000000000"
-    condiciones =    "111111111111111"
-    alcance =        "111111111111111"
-    mecanismo =      "111111111111111"
+    estado_inicial = "000"
+    condiciones =    "111"
+    alcance =        "111"
+    mecanismo =      "111"
 
     gestor_sistema = Manager(estado_inicial)
 
