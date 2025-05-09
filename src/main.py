@@ -5,17 +5,15 @@ from src.controllers.strategies.geometric import GeometricSIA
 def iniciar():
     """Punto de entrada principal"""
                     # ABCD #
-    estado_inicial = "000"
-    condiciones =    "111"
-    alcance =        "111"
-    mecanismo =      "111"
+    estado_inicial = "1000000000"
+    condiciones =    "1111111111"
+    alcance =        "1111111111"
+    mecanismo =      "1111111111"
 
     gestor_sistema = Manager(estado_inicial)
 
     ### Ejemplo de solución mediante módulo de fuerza bruta ###
     analizador_fb = GeometricSIA(gestor_sistema)
-    tabla = analizador_fb.generar_tabla_T(condiciones, alcance, mecanismo)
-    print(tabla)
 
     sia_uno = analizador_fb.aplicar_estrategia(
         condiciones,

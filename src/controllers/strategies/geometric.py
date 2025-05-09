@@ -38,6 +38,7 @@ class GeometricSIA(SIA):
     ) -> Solution:
         # --- 1) Preparo subsistema y calculo i0 ---
         self.sia_preparar_subsistema(condiciones, alcance, mecanismo)
+        
         self.N = len(self.sia_gestor.estado_inicial)
         # entero del estado inicial (bit-string → int)
         bits = "".join(str(b) for b in self.sia_gestor.estado_inicial)
@@ -90,8 +91,12 @@ class GeometricSIA(SIA):
         phi = emd_efecto(dist, self.sia_dists_marginales)
 
         # 5) formatea la partición para devolverla
-        seleccion   = [(1, i) for i in subalcance]
-        complemento = [(0, i) for i in submecanismo]
+        seleccion  = ([(1, i) for i in subalcance] + [(0, i) for i in submecanismo])   # futuros que migran
+        complemento = (
+            [(1, i) for i in self.sia_subsistema.indices_ncubos   if i not in subalcance] +
+            [(0, i) for i in self.sia_subsistema.dims_ncubos      if i not in submecanismo]
+        )
+
         particion_str = fmt_biparte_q(seleccion, complemento)
 
         return Solution(
@@ -128,5 +133,3 @@ class GeometricSIA(SIA):
         self._cost_cache[key] = cost
         return cost
     
-    def nodes_complement(self, seleccion: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
-        return [v for v in self.vertices if v not in seleccion]
