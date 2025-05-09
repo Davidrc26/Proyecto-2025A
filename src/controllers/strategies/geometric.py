@@ -1,3 +1,4 @@
+from typing import List, Tuple
 from src.constants.base import NET_LABEL, TYPE_TAG
 from src.constants.models import GEOMETRIC_ANALYSIS_TAG, GEOMETRIC_STRAREGY_TAG
 from src.models.base.sia import SIA
@@ -7,21 +8,18 @@ from src.middlewares.slogger import SafeLogger
 from src.models.core.solution import Solution
 
 import numpy as np
-import pandas as pd
-from itertools import combinations
-from src.funcs.base import emd_efecto
+import random
+from src.funcs.base import emd_efecto  # lo necesitarás después
 from src.funcs.format import fmt_biparte_q
 
-
 def hamming_distance(a: int, b: int) -> int:
-    """Distancia de Hamming entre enteros a y b."""
     return bin(a ^ b).count('1')
 
 
 class GeometricSIA(SIA):
     """
-    Estrategia geométrica-topológica para bipartición óptima.
-    Implementa el cálculo recursivo de costos y selección de partición.
+    Estrategia geométrica-topológica (esqueleto paso 1):
+    sólo calcula t(i0→j) para j a un solo bit de distancia.
     """
 
     def __init__(self, gestor: Manager, **kwargs):
@@ -38,67 +36,72 @@ class GeometricSIA(SIA):
         alcance: str,
         mecanismo: str
     ) -> Solution:
-        # Preparar subsistema
+        # --- 1) Preparo subsistema y calculo i0 ---
         self.sia_preparar_subsistema(condiciones, alcance, mecanismo)
-        # Inicializar dimensiones
         self.N = len(self.sia_gestor.estado_inicial)
-        self.size = 1 << self.N
+        # entero del estado inicial (bit-string → int)
+        bits = "".join(str(b) for b in self.sia_gestor.estado_inicial)
+        self.i0 = int(bits, 2)
 
-        # Calcular tabla de costos
-        T = self._calcular_tabla_costos()
-        # Identificar candidatos
-        candidates = self._identificar_candidatos(T)
+        # --- 2) Calculo sólo las distancias t(i0→j) para flips de 1 bit ---
+        one_bit_states = [self.i0 ^ (1 << b) for b in range(self.N)]
+        T = {}  # dict var → dict(j → t(i0,j))
+        for v, nc in enumerate(self.sia_subsistema.ncubos):
+            X = nc.data.flatten()
+            self._current_var = v
+            self._cost_cache.clear()
+            row = {}
+            for j in one_bit_states:
+                row[j] = self._calcular_transicion_coste(self.i0, j, X)
+            T[v] = row
+        sum_per_j = {}
+        for v, row in T.items():
+            for j, cost in row.items():
+                sum_per_j[j] = sum_per_j.get(j, 0.0) + cost
 
-        # Evaluar candidatos
-        best, best_phi, best_dist = None, np.inf, None
-        for sel in candidates:
-            comp = [v for v in range(self.N) if v not in sel]
-            part = self.sia_subsistema.bipartir(
-                np.array(sel, dtype=np.int8),
-                np.array(comp, dtype=np.int8)
-            )
-            dist_p = part.distribucion_marginal()
-            phi = emd_efecto(dist_p, self.sia_dists_marginales)
-            if phi < best_phi:
-                best_phi, best, best_dist = phi, sel, dist_p
+# 3) Encontrar el j que tenga la suma mínima
+        best_j = min(sum_per_j, key=sum_per_j.get)
+        best_sum = sum_per_j[best_j]
+        changed_bits = [
+            idx
+            for idx in range(self.N)
+            if ((self.i0 >> idx) & 1) != ((best_j >> idx) & 1)
+        ]
+        print(f"Bits cambiados de {self.i0:0{self.N}b} → {best_j:0{self.N}b}: {changed_bits}")
+        nonzero = []
+        for v, row in T.items():
+            cost = row.get(best_j, 0.0)
+        if abs(cost) > 1e-12:
+            # si quieres el literal, en lugar de 'v' podrías usar:
+            # var_name = self.sia_subsistema.ncubos[v].indice
+            nonzero.append(v)
+            print(f"Variables con costo no-cero en t(i0 → {best_j:0{self.N}b}): {nonzero}")
+        # 1) convierte changed_bits y nonzero en arrays int8
+        subalcance  = np.array(changed_bits, dtype=np.int8)
+        submecanismo = np.array(nonzero,    dtype=np.int8)
 
-        # Formatear partición
-        seleccion = [(1, i) for i in best]
-        complemento = [(1, i) for i in range(self.N) if i not in best]
+        # 2) llama a bipartir con esos dos vectores
+        part = self.sia_subsistema.bipartir(subalcance, submecanismo)
+
+        # 3) obtén su distribución marginal
+        dist = part.distribucion_marginal()
+
+        # 4) a partir de aquí ya puedes evaluar el φ o seguir tu lógica
+        phi = emd_efecto(dist, self.sia_dists_marginales)
+
+        # 5) formatea la partición para devolverla
+        seleccion   = [(1, i) for i in subalcance]
+        complemento = [(0, i) for i in submecanismo]
         particion_str = fmt_biparte_q(seleccion, complemento)
 
         return Solution(
             estrategia="Geometric",
-            perdida=best_phi,
+            perdida=phi,
             distribucion_subsistema=self.sia_dists_marginales,
-            distribucion_particion=best_dist,
+            distribucion_particion=dist,
             tiempo_total=0.0,
             particion=particion_str,
         )
-
-    def _calcular_tabla_costos(self) -> dict:
-        """
-        Top-down: para cada variable v, calculo sólo t(i,j) partiendo de i=0,
-        y dejo que la recursión explore todos los (k,j) necesarios.
-        """
-        T = {}
-        for v, nc in enumerate(self.sia_subsistema.ncubos):
-            self._current_var = v
-            X = nc.data.flatten()
-            self._cost_cache.clear()
-
-            # Llamadas raíz: i = 0 contra todos los j
-            for j in range(self.size):
-                self._calcular_transicion_coste(0, j, X)
-
-            # Ahora la caché contiene t(0,j), t(k,j), t(...), vamos a volcarlo en M
-            M = np.zeros((self.size, self.size), dtype=float)
-            for (i, j, _), cost in self._cost_cache.items():
-                M[i, j] = cost
-
-            T[v] = M
-
-        return T
 
     def _calcular_transicion_coste(
         self,
@@ -106,54 +109,24 @@ class GeometricSIA(SIA):
         j: int,
         X: np.ndarray
     ) -> float:
-        """Calcula recursivamente t(i,j) según la ecuación 5.1."""
         key = (i, j, id(X))
         if key in self._cost_cache:
             return self._cost_cache[key]
 
-        # Debug print indicando variable y transición
-        var_name = self.sia_subsistema.ncubos[self._current_var].indice
-        print(f"Variable {var_name}: calculando costo t({i}->{j}) para X de longitud {X.size}")
-
         d = hamming_distance(i, j)
         gamma = 2 ** (-d)
         base = abs(X[i] - X[j])
-        sum_neighbors = 0.0
+        suma = 0.0
         if d > 1:
-            for bit in range(self.N):
-                k = i ^ (1 << bit)
+            # recursión sólo si haces caminos más largos, pero ahora no será el caso
+            for b in range(self.N):
+                k = i ^ (1 << b)
                 if hamming_distance(k, j) == d - 1:
-                    sum_neighbors += self._calcular_transicion_coste(k, j, X)
+                    suma += self._calcular_transicion_coste(k, j, X)
 
-        cost = gamma * (base + sum_neighbors)
+        cost = gamma * (base + suma)
         self._cost_cache[key] = cost
         return cost
-
-    def _identificar_candidatos(self, T: dict) -> list:
-        """Genera biparticiones candidatas: combinaciones no triviales."""
-        n_vars = len(self.sia_subsistema.ncubos)
-        return [combo for k in range(1, n_vars) for combo in combinations(range(n_vars), k)]
-
-    def generar_tabla_T(
-        self,
-        condiciones: str,
-        alcance: str,
-        mecanismo: str
-    ) -> pd.DataFrame:
-        """Genera DataFrame con T de transiciones."""
-        self.sia_preparar_subsistema(condiciones, alcance, mecanismo)
-        self.N = len(self.sia_gestor.estado_inicial)
-        self.size = 1 << self.N
-
-        T = self._calcular_tabla_costos()
-        labels = [f"{i:0{self.N}b}" for i in range(self.size)]
-        var_names = [nc.indice for nc in self.sia_subsistema.ncubos]
-
-        panels = [T[v] for v in range(len(var_names))]
-        data = np.hstack(panels)
-        col_arrays = [
-            [vn for vn in var_names for _ in range(self.size)],
-            labels * len(var_names)
-        ]
-        columns = pd.MultiIndex.from_arrays(col_arrays, names=["Variable", "Estado_j"])
-        return pd.DataFrame(data, index=labels, columns=columns)
+    
+    def nodes_complement(self, seleccion: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+        return [v for v in self.vertices if v not in seleccion]
