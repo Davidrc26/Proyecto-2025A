@@ -37,30 +37,55 @@ class GeometricSIA(SIA):
         # 1) preparo subsistema y estado inicial
         self.sia_preparar_subsistema(condiciones, alcance, mecanismo)
 
+        posicion_real_cubos = [
+            i for i in range(len(alcance)) if alcance[i] == "1"
+        ]
+
+        posicion_real_dimensiones = [
+            i for i in range(len(mecanismo)) if mecanismo[i] == "1"
+        ]
+
+
         self.N = len(self.sia_gestor.estado_inicial)
-        bits = "".join(str(b) for b in self.sia_gestor.estado_inicial)
+        bits = ""
+        for i in range(self.N):
+            if mecanismo[i] == "1":
+                bits += self.sia_gestor.estado_inicial[i] 
+
         self.i0 = int(bits, 2)
-        full_mask = (1 << self.N) - 1
+        
+        all_flip = ""
+
+        for bit in bits:
+            if bit == "1":
+                all_flip += "0"
+            else:
+                all_flip += "1"
+
+        all_flip = int(all_flip, 2)
         start_time = time.time()
 
         # 2) genero estados a evaluar:
         #    - one_bit_states: flip de un solo bit
         #    - all_flip    : complemento completo (todos los bits)
-        one_bit_states = [self.i0 ^ (1 << b) for b in range(self.N)]
-        all_flip       = full_mask ^ self.i0
+        # 100000000000 - 100000 00000 00001
+        one_bit_states = [
+            self.i0 ^ (1 << b) for b in range(len(bits))
+            ]
+        
         # me aseguro de no duplicar en caso de N=1
         j_candidates = list(dict.fromkeys(one_bit_states + [all_flip]))
 
         # 3) calculo T[v][j] = t(i0→j) sólo para esos j
         T = {}  # variable → { j → coste }
-        for v, nc in enumerate(self.sia_subsistema.ncubos):
+        for i, nc in enumerate(self.sia_subsistema.ncubos):
             X = nc.data.flatten()
-            self._current_var = v
+            self._current_var = posicion_real_cubos[i]
             self._cost_cache.clear()
             row = {}
             for j in j_candidates:
                 row[j] = self._calcular_transicion_coste(self.i0, j, X)
-            T[v] = row
+            T[posicion_real_cubos[i]] = row
 
         # 4) sumo costes por cada j y elijo el j con suma mínima
         sum_per_j = {}
@@ -69,19 +94,37 @@ class GeometricSIA(SIA):
                 sum_per_j[j] = sum_per_j.get(j, 0.0) + cost
 
         best_j  = min(sum_per_j, key=sum_per_j.get)
-        best_sum= sum_per_j[best_j]
+        
+ 
+        #T es un diccionario  e diccionarios, quiero la suma de cada diccionario interno de T
+        sum_per_dict = {}
+        for k,row in T.items():
+            for j, cost in row.items():
+                sum_per_dict[k] = sum_per_dict.get(k, 0.0) + cost
 
         # 5) saco qué bits cambiaron, y qué variables tienen coste ≠ 0
         changed_bits = [
-            idx
-            for idx in range(self.N)
+            posicion_real_dimensiones[idx]
+            for idx in range(len(bits))
             if ((self.i0 >> idx) & 1) != ((best_j >> idx) & 1)
         ]
+        
         nonzero = [
             v
             for v, row in T.items()
             if abs(row.get(best_j, 0.0)) > 1e-12
         ]
+        
+        if best_j == all_flip:
+            cubo_chosen = -1
+            value = float("inf")
+            for key in T.keys():
+                valueAux = T[key][best_j]
+                if valueAux < value:
+                    cubo_chosen = key
+                    value = valueAux
+            nonzero.remove(cubo_chosen)
+                
 
         # 6) construyo subalcance / submecanismo y biparto
         submecanismo   = np.array(changed_bits, dtype=np.int8)
