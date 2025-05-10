@@ -6,13 +6,16 @@ from src.controllers.manager import Manager
 from src.middlewares.profile import profiler_manager, profile
 from src.middlewares.slogger import SafeLogger
 from src.models.core.solution import Solution
+import threading
 
 import numpy as np
 from src.funcs.base import emd_efecto  # lo necesitarás después
 from src.funcs.format import fmt_biparte_q
 
+
 def hamming_distance(a: int, b: int) -> int:
     return bin(a ^ b).count('1')
+
 
 class GeometricSIA(SIA):
     """
@@ -20,12 +23,14 @@ class GeometricSIA(SIA):
     - calcula t(i0→j) para flips de 1 bit
     - y además para el “complemento completo” (todos los bits invertidos)
     """
+
     def __init__(self, gestor: Manager, **kwargs):
         super().__init__(gestor)
         session_name = f"{NET_LABEL}{len(gestor.estado_inicial)}{gestor.pagina}_GEOM"
         profiler_manager.start_session(session_name)
         self.logger = SafeLogger(GEOMETRIC_STRAREGY_TAG)
         self._cost_cache = {}
+        self.T = {}
 
     @profile(context={TYPE_TAG: GEOMETRIC_ANALYSIS_TAG})
     def aplicar_estrategia(
@@ -45,15 +50,14 @@ class GeometricSIA(SIA):
             i for i in range(len(mecanismo)) if mecanismo[i] == "1"
         ]
 
-
         self.N = len(self.sia_gestor.estado_inicial)
         bits = ""
         for i in range(self.N):
             if mecanismo[i] == "1":
-                bits += self.sia_gestor.estado_inicial[i] 
+                bits += self.sia_gestor.estado_inicial[i]
 
         self.i0 = int(bits, 2)
-        
+
         all_flip = ""
 
         for bit in bits:
@@ -71,34 +75,34 @@ class GeometricSIA(SIA):
         # 100000000000 - 100000 00000 00001
         one_bit_states = [
             self.i0 ^ (1 << b) for b in range(len(bits))
-            ]
-        
+        ]
+
         # me aseguro de no duplicar en caso de N=1
         j_candidates = list(dict.fromkeys(one_bit_states + [all_flip]))
 
         # 3) calculo T[v][j] = t(i0→j) sólo para esos j
-        T = {}  # variable → { j → coste }
+        self.T = {}  # variable → { j → coste }
+        hilos = []
         for i, nc in enumerate(self.sia_subsistema.ncubos):
-            X = nc.data.flatten()
-            self._current_var = posicion_real_cubos[i]
-            self._cost_cache.clear()
-            row = {}
-            for j in j_candidates:
-                row[j] = self._calcular_transicion_coste(self.i0, j, X)
-            T[posicion_real_cubos[i]] = row
+            ##necesito inicializar hilo para cada cubo
+            hilo = threading.Thread(target=self.proccess_nc, args=(nc, i, j_candidates))
+            hilos.append(hilo)
+            hilo.start()
 
-        # 4) sumo costes por cada j y elijo el j con suma mínima
+        for hilo in hilos:
+            hilo.join()
+
+            # 4) sumo costes por cada j y elijo el j con suma mínima
         sum_per_j = {}
-        for row in T.values():
+        for row in self.T.values():
             for j, cost in row.items():
                 sum_per_j[j] = sum_per_j.get(j, 0.0) + cost
 
-        best_j  = min(sum_per_j, key=sum_per_j.get)
-        
- 
-        #T es un diccionario  e diccionarios, quiero la suma de cada diccionario interno de T
+        best_j = min(sum_per_j, key=sum_per_j.get)
+
+        # T es un diccionario  e diccionarios, quiero la suma de cada diccionario interno de T
         sum_per_dict = {}
-        for k,row in T.items():
+        for k, row in self.T.items():
             for j, cost in row.items():
                 sum_per_dict[k] = sum_per_dict.get(k, 0.0) + cost
 
@@ -108,26 +112,25 @@ class GeometricSIA(SIA):
             for idx in range(len(bits))
             if ((self.i0 >> idx) & 1) != ((best_j >> idx) & 1)
         ]
-        
+
         nonzero = [
             v
-            for v, row in T.items()
+            for v, row in self.T.items()
             if abs(row.get(best_j, 0.0)) > 1e-12
         ]
-        
+
         if best_j == all_flip:
             cubo_chosen = -1
             value = float("inf")
-            for key in T.keys():
-                valueAux = T[key][best_j]
+            for key in self.T.keys():
+                valueAux = self.T[key][best_j]
                 if valueAux < value:
                     cubo_chosen = key
                     value = valueAux
             nonzero.remove(cubo_chosen)
-                
 
         # 6) construyo subalcance / submecanismo y biparto
-        submecanismo   = np.array(changed_bits, dtype=np.int8)
+        submecanismo = np.array(changed_bits, dtype=np.int8)
         subalcance = np.array(nonzero,      dtype=np.int8)
         part = self.sia_subsistema.bipartir(subalcance, submecanismo)
         dist = part.distribucion_marginal()
@@ -136,10 +139,12 @@ class GeometricSIA(SIA):
         phi = emd_efecto(dist, self.sia_dists_marginales)
 
         # 8) formateo cadena de partición
-        seleccion   = [(1, i) for i in subalcance] + [(0, i) for i in submecanismo]
+        seleccion = [(1, i) for i in subalcance] + [(0, i)
+                                                    for i in submecanismo]
         complemento = (
             [(1, i) for i in self.sia_subsistema.indices_ncubos if i not in subalcance] +
-            [(0, i) for i in self.sia_subsistema.dims_ncubos       if i not in submecanismo]
+            [(0, i)
+             for i in self.sia_subsistema.dims_ncubos if i not in submecanismo]
         )
         particion_str = fmt_biparte_q(seleccion, complemento)
 
@@ -165,10 +170,10 @@ class GeometricSIA(SIA):
         if key in self._cost_cache:
             return self._cost_cache[key]
 
-        d     = hamming_distance(i, j)
+        d = hamming_distance(i, j)
         gamma = 2 ** (-d)
-        base  = abs(X[i] - X[j])
-        suma  = 0.0
+        base = abs(X[i] - X[j])
+        suma = 0.0
         if d > 1:
             for b in range(self.N):
                 k = i ^ (1 << b)
@@ -178,3 +183,12 @@ class GeometricSIA(SIA):
         cost = gamma * (base + suma)
         self._cost_cache[key] = cost
         return cost
+
+    def proccess_nc(self, nc, key, j_candidates):
+        X = nc.data.flatten()
+        self._current_var = key
+        self._cost_cache.clear()
+        row = {}
+        for j in j_candidates:
+            row[j] = self._calcular_transicion_coste(self.i0, j, X)
+        self.T[key] = row
