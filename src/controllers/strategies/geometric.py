@@ -41,15 +41,6 @@ class GeometricSIA(SIA):
     ) -> Solution:
         # 1) preparo subsistema y estado inicial
         self.sia_preparar_subsistema(condiciones, alcance, mecanismo)
-
-        posicion_real_cubos = [
-            i for i in range(len(alcance)) if alcance[i] == "1"
-        ]
-
-        posicion_real_dimensiones = [
-            i for i in range(len(mecanismo)) if mecanismo[i] == "1"
-        ]
-
         self.N = len(self.sia_gestor.estado_inicial)
         bits = ""
         for i in range(self.N):
@@ -85,7 +76,7 @@ class GeometricSIA(SIA):
         hilos = []
         for i, nc in enumerate(self.sia_subsistema.ncubos):
             ##necesito inicializar hilo para cada cubo
-            hilo = threading.Thread(target=self.proccess_nc, args=(nc, i, j_candidates))
+            hilo = threading.Thread(target=self.proccess_nc, args=(nc, self.sia_subsistema.indices_ncubos[i], j_candidates))
             hilos.append(hilo)
             hilo.start()
 
@@ -108,7 +99,7 @@ class GeometricSIA(SIA):
 
         # 5) saco qué bits cambiaron, y qué variables tienen coste ≠ 0
         changed_bits = [
-            posicion_real_dimensiones[idx]
+            self.sia_subsistema.dims_ncubos[idx]
             for idx in range(len(bits))
             if ((self.i0 >> idx) & 1) != ((best_j >> idx) & 1)
         ]
