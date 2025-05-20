@@ -41,6 +41,7 @@ class GeometricSIA(SIA):
     ) -> Solution:
         # 1) preparo subsistema y estado inicial
         self.sia_preparar_subsistema(condiciones, alcance, mecanismo)
+        start_time = time.time()
         self.N = len(self.sia_gestor.estado_inicial)
         bits = ""
         for i in range(self.N):
@@ -49,28 +50,34 @@ class GeometricSIA(SIA):
 
         self.i0 = int(bits, 2)
 
-        all_flip = ""
+        #calculo cual es el mejor cubo para esto hago el promedio por columna de la matriz tpm y escojo el que tiene menor diferencia con su valor de estado inicial
+        # Versión vectorizada con NumPy
+        tpm = self.sia_cargar_tpm()
 
-        for bit in bits:
-            if bit == "1":
-                all_flip += "0"
-            else:
-                all_flip += "1"
+        # Calcular promedio por columna
+        column_averages = np.mean(tpm, axis=0)
 
-        all_flip = int(all_flip, 2)
-        start_time = time.time()
+        # Crear un vector de referencia basado en el estado inicial
+        # (1 si el bit es 1, 0 si es 0)
+        reference_bits = self.sia_dists_marginales
 
-        # 2) genero estados a evaluar:
-        #    - one_bit_states: flip de un solo bit
-        #    - all_flip    : complemento completo (todos los bits)
-        # 100000000000 - 100000 00000 00001
+        # Calcular diferencias absolutas
+        column_diffs = np.abs(reference_bits - column_averages)
+
+        # Encontrar columna con menor diferencia
+        min_diff_col = np.argmin(column_diffs)
+        print(f"La columna con menor diferencia es: {min_diff_col}")
+        print(f"Valor de la diferencia: {column_diffs[min_diff_col]}")
+
+
         one_bit_states = [
             self.i0 ^ (1 << b) for b in range(len(bits))
         ]
 
         # me aseguro de no duplicar en caso de N=1
-        j_candidates = list(dict.fromkeys(one_bit_states + [all_flip]))
-
+        j_candidates = list(dict.fromkeys(one_bit_states))
+        
+        
         # 3) calculo T[v][j] = t(i0→j) sólo para esos j
         self.T = {}  # variable → { j → coste }
         hilos = []
@@ -110,15 +117,7 @@ class GeometricSIA(SIA):
             if abs(row.get(best_j, 0.0)) > 1e-12
         ]
 
-        if best_j == all_flip:
-            cubo_chosen = -1
-            value = float("inf")
-            for key in self.T.keys():
-                valueAux = self.T[key][best_j]
-                if valueAux < value:
-                    cubo_chosen = key
-                    value = valueAux
-            nonzero.remove(cubo_chosen)
+        
 
         # 6) construyo subalcance / submecanismo y biparto
         submecanismo = np.array(changed_bits, dtype=np.int8)
@@ -183,3 +182,5 @@ class GeometricSIA(SIA):
         for j in j_candidates:
             row[j] = self._calcular_transicion_coste(self.i0, j, X)
         self.T[key] = row
+
+
