@@ -43,109 +43,133 @@ class GeometricSIA(SIA):
         self.sia_preparar_subsistema(condiciones, alcance, mecanismo)
         start_time = time.time()
         self.N = len(self.sia_gestor.estado_inicial)
-        bits = ""
-        for i in range(self.N):
-            if mecanismo[i] == "1":
-                bits += self.sia_gestor.estado_inicial[i]
-
+        bits = "".join(
+            self.sia_gestor.estado_inicial[i]
+            for i in range(self.N)
+            if mecanismo[i] == "1"
+        )
         self.i0 = int(bits, 2)
-
-        #calculo cual es el mejor cubo para esto hago el promedio por columna de la matriz tpm y escojo el que tiene menor diferencia con su valor de estado inicial
-        # Versión vectorizada con NumPy
+    
+        # --- FASE 1: primer cubo según TPM ---
         tpm = self.sia_cargar_tpm()
-
-        # Calcular promedio por columna
-        column_averages = np.mean(tpm, axis=0)
-
-        # Crear un vector de referencia basado en el estado inicial
-        # (1 si el bit es 1, 0 si es 0)
-        reference_bits = self.sia_dists_marginales
-
-        # Calcular diferencias absolutas
-        column_diffs = np.abs(reference_bits - column_averages)
-
-        # Encontrar columna con menor diferencia
-        min_diff_col = np.argmin(column_diffs)
-        print(f"La columna con menor diferencia es: {min_diff_col}")
-        print(f"Valor de la diferencia: {column_diffs[min_diff_col]}")
-
-
-        one_bit_states = [
-            self.i0 ^ (1 << b) for b in range(len(bits))
-        ]
-
-        # me aseguro de no duplicar en caso de N=1
+        medias = np.mean(tpm, axis=0)
+        referencia = self.sia_dists_marginales
+        diffs = np.abs(referencia - medias)
+        mejor_col = np.argmax(diffs)
+    
+        # guardar alcance/mecanismo de fase 1
+        alcance_fase1   = np.array([mejor_col], dtype=np.int8)
+        mecanismo_fase1 = np.array([],           dtype=np.int8)
+        part1 = self.sia_subsistema.bipartir(alcance_fase1, mecanismo_fase1)
+        dist1 = part1.distribucion_marginal()
+        phi_fase1 = emd_efecto(dist1, referencia)
+    
+        # si pérdida es 0, retornamos ya
+        if phi_fase1 == 0:
+            seleccion1 = [(1, i) for i in alcance_fase1] + [(0, i) for i in mecanismo_fase1]
+            complemento1 = (
+                [(1, i) for i in self.sia_subsistema.indices_ncubos   if i not in alcance_fase1] +
+                [(0, i) for i in self.sia_subsistema.dims_ncubos         if i not in mecanismo_fase1]
+            )
+            particion_str1 = fmt_biparte_q(seleccion1, complemento1)
+            return Solution(
+                estrategia="Geometric",
+                perdida=phi_fase1,
+                distribucion_subsistema=referencia,
+                distribucion_particion=dist1,
+                tiempo_total=time.time() - start_time,
+                particion=particion_str1,
+            )
+    
+        # --- FASE 2: cómputo completo si phi_fase1 != 0 ---
+        one_bit_states = [self.i0 ^ (1 << b) for b in range(len(bits))]
         j_candidates = list(dict.fromkeys(one_bit_states))
-        
-        
-        # 3) calculo T[v][j] = t(i0→j) sólo para esos j
-        self.T = {}  # variable → { j → coste }
+    
+        self.T = {}
         hilos = []
         for i, nc in enumerate(self.sia_subsistema.ncubos):
-            ##necesito inicializar hilo para cada cubo
-            hilo = threading.Thread(target=self.proccess_nc, args=(nc, self.sia_subsistema.indices_ncubos[i], j_candidates))
-            hilos.append(hilo)
-            hilo.start()
-
+            hilo = threading.Thread(
+                target=self.proccess_nc,
+                args=(nc, self.sia_subsistema.indices_ncubos[i], j_candidates)
+            )
+            hilos.append(hilo); hilo.start()
         for hilo in hilos:
             hilo.join()
-
-            # 4) sumo costes por cada j y elijo el j con suma mínima
+    
+        # sumar costes y elegir best_j
         sum_per_j = {}
         for row in self.T.values():
             for j, cost in row.items():
                 sum_per_j[j] = sum_per_j.get(j, 0.0) + cost
-
         best_j = min(sum_per_j, key=sum_per_j.get)
-
-        # T es un diccionario  e diccionarios, quiero la suma de cada diccionario interno de T
-        sum_per_dict = {}
-        for k, row in self.T.items():
-            for j, cost in row.items():
-                sum_per_dict[k] = sum_per_dict.get(k, 0.0) + cost
-
-        # 5) saco qué bits cambiaron, y qué variables tienen coste ≠ 0
+    
+        # determinar bits cambiados y variables con coste
         changed_bits = [
             self.sia_subsistema.dims_ncubos[idx]
             for idx in range(len(bits))
             if ((self.i0 >> idx) & 1) != ((best_j >> idx) & 1)
         ]
-
         nonzero = [
-            v
-            for v, row in self.T.items()
+            v for v, row in self.T.items()
             if abs(row.get(best_j, 0.0)) > 1e-12
         ]
-
-        
-
-        # 6) construyo subalcance / submecanismo y biparto
-        submecanismo = np.array(changed_bits, dtype=np.int8)
-        subalcance = np.array(nonzero,      dtype=np.int8)
-        part = self.sia_subsistema.bipartir(subalcance, submecanismo)
-        dist = part.distribucion_marginal()
-
-        # 7) calculo φ para la partición resultante
-        phi = emd_efecto(dist, self.sia_dists_marginales)
-
-        # 8) formateo cadena de partición
-        seleccion = [(1, i) for i in subalcance] + [(0, i)
-                                                    for i in submecanismo]
-        complemento = (
-            [(1, i) for i in self.sia_subsistema.indices_ncubos if i not in subalcance] +
-            [(0, i)
-             for i in self.sia_subsistema.dims_ncubos if i not in submecanismo]
-        )
-        particion_str = fmt_biparte_q(seleccion, complemento)
-
-        return Solution(
-            estrategia="Geometric",
-            perdida=phi,
-            distribucion_subsistema=self.sia_dists_marginales,
-            distribucion_particion=dist,
-            tiempo_total=time.time() - start_time,
-            particion=particion_str,
-        )
+    
+        # bipartir fase 2
+        alcance_fase2   = np.array(nonzero,      dtype=np.int8)
+        mecanismo_fase2 = np.array(changed_bits,  dtype=np.int8)
+        part2 = self.sia_subsistema.bipartir(alcance_fase2, mecanismo_fase2)
+        dist2 = part2.distribucion_marginal()
+        phi_fase2 = emd_efecto(dist2, referencia)
+    
+        # si pérdida en fase 2 es 0, retornamos también
+        if phi_fase2 == 0:
+            seleccion2 = [(1, i) for i in alcance_fase2] + [(0, i) for i in mecanismo_fase2]
+            complemento2 = (
+                [(1, i) for i in self.sia_subsistema.indices_ncubos   if i not in alcance_fase2] +
+                [(0, i) for i in self.sia_subsistema.dims_ncubos         if i not in mecanismo_fase2]
+            )
+            particion_str2 = fmt_biparte_q(seleccion2, complemento2)
+            return Solution(
+                estrategia="Geometric",
+                perdida=phi_fase2,
+                distribucion_subsistema=referencia,
+                distribucion_particion=dist2,
+                tiempo_total=time.time() - start_time,
+                particion=particion_str2,
+            )
+    
+        # Si ambos valores de phi no son cero, retornar el de menor valor
+        if phi_fase1 < phi_fase2:
+            seleccion = [(1, i) for i in alcance_fase1] + [(0, i) for i in mecanismo_fase1]
+            complemento = (
+                [(1, i) for i in self.sia_subsistema.indices_ncubos   if i not in alcance_fase1] +
+                [(0, i) for i in self.sia_subsistema.dims_ncubos         if i not in mecanismo_fase1]
+            )
+            particion_str = fmt_biparte_q(seleccion, complemento)
+            return Solution(
+                estrategia="Geometric",
+                perdida=phi_fase1,
+                distribucion_subsistema=referencia,
+                distribucion_particion=dist1,
+                tiempo_total=time.time() - start_time,
+                particion=particion_str,
+            )
+        else:
+            # finalmente, retorno solución de fase 2 (tiene menor phi o igual)
+            seleccion = [(1, i) for i in alcance_fase2] + [(0, i) for i in mecanismo_fase2]
+            complemento = (
+                [(1, i) for i in self.sia_subsistema.indices_ncubos   if i not in alcance_fase2] +
+                [(0, i) for i in self.sia_subsistema.dims_ncubos         if i not in mecanismo_fase2]
+            )
+            particion_str = fmt_biparte_q(seleccion, complemento)
+            return Solution(
+                estrategia="Geometric",
+                perdida=phi_fase2,
+                distribucion_subsistema=referencia,
+                distribucion_particion=dist2,
+                tiempo_total=time.time() - start_time,
+                particion=particion_str,
+            )
 
     def _calcular_transicion_coste(
         self,
