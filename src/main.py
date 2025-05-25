@@ -9,7 +9,7 @@ def iniciar():
 
     condiciones =    "1111111111"
                      #ABCDEFGHIJKLMNO# t+1
-    alcance =        "1111111111"
+    alcance =        "0111111111"
                      #ABCDEFGHIJKLMNO# t
     mecanismo =      "1111111111"
 
