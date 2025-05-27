@@ -59,7 +59,7 @@ class GeometricSIA(SIA):
             for i in range(self.N)
             if mecanismo[i] == "1"
         )
-        self.i0 = int(bits, 2)
+        self.i0 = int(bits[::-1], 2)
     
         # --- FASE 1: primer cubo según TPM ---
         tpm = self.sia_subsistema.collapsed_ncubes
@@ -209,10 +209,13 @@ class GeometricSIA(SIA):
 
     def proccess_nc(self, nc, key, j_candidates):
         X = nc.data.flatten()
+        print(f"Procesando cubo {key}", "el aplastado es",X)
         self._current_var = key
         self._cost_cache.clear()
         row = {}
         for j in j_candidates:
+            if j == 8194:
+                print("Encontré el 8194, no lo voy a calcular")
             row[j] = self._calcular_transicion_coste(self.i0, j, X)
         self.T[key] = row
 
