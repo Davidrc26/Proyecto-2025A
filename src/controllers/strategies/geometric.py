@@ -52,7 +52,7 @@ class GeometricSIA(SIA):
         # 1) preparo subsistema y estado inicial
         self.pop_size = len(condiciones)
         self.sia_preparar_subsistema(condiciones, alcance, mecanismo)
-        start_time = time.time()
+        self.start_time = time.time()
         self.N = len(self.sia_gestor.estado_inicial)
         bits = "".join(
             self.sia_gestor.estado_inicial[i]
@@ -66,7 +66,7 @@ class GeometricSIA(SIA):
         values = [t[1] for t in tpm]
         referencia = self.sia_dists_marginales
         diffs = np.abs(referencia - values)
-        best_col = np.argmax(diffs)
+        best_col = np.argmin(diffs)
         # guardar alcance/mecanismo de fase 1
         alcance_fase1   = np.array([tpm[best_col][0]], dtype=np.int8)
         mecanismo_fase1 = np.array([],           dtype=np.int8)
@@ -87,7 +87,7 @@ class GeometricSIA(SIA):
                 perdida=phi_fase1,
                 distribucion_subsistema=referencia,
                 distribucion_particion=dist1,
-                tiempo_total=time.time() - start_time,
+                tiempo_total=time.time() - self.start_time,
                 particion=particion_str1,
             )
     
@@ -138,7 +138,7 @@ class GeometricSIA(SIA):
                 perdida=phi_fase2,
                 distribucion_subsistema=referencia,
                 distribucion_particion=dist2,
-                tiempo_total=time.time() - start_time,
+                tiempo_total=time.time() - self.start_time,
                 particion=particion_str2,
             )
     
@@ -159,7 +159,7 @@ class GeometricSIA(SIA):
                     perdida=phi_fase1,
                     distribucion_subsistema=referencia,
                     distribucion_particion=dist1,
-                    tiempo_total=time.time() - start_time,
+                    tiempo_total=time.time() - self.start_time,
                     particion=particion_str,
                 )
             else:
@@ -172,7 +172,7 @@ class GeometricSIA(SIA):
                     perdida=solution.perdida,
                     distribucion_subsistema=referencia,
                     distribucion_particion=solution.distribucion_particion,
-                    tiempo_total=time.time() - start_time,
+                    tiempo_total=time.time() - self.start_time,
                     particion=particion_str,
                 ) 
         else:
@@ -209,13 +209,10 @@ class GeometricSIA(SIA):
 
     def proccess_nc(self, nc, key, j_candidates):
         X = nc.data.flatten()
-        print(f"Procesando cubo {key}", "el aplastado es",X)
         self._current_var = key
         self._cost_cache.clear()
         row = {}
         for j in j_candidates:
-            if j == 8194:
-                print("Encontré el 8194, no lo voy a calcular")
             row[j] = self._calcular_transicion_coste(self.i0, j, X)
         self.T[key] = row
 
@@ -251,7 +248,7 @@ class GeometricSIA(SIA):
         presentes = self.sia_subsistema.dims_ncubos
         self.m = futuros.size
         n = presentes.size
-        self.N = len()
+        self.N = len(self.sia_gestor.estado_inicial)
         self.indices_futuro = futuros
         self.indices_presente = presentes
         self.dists_ref = self.sia_dists_marginales
@@ -272,8 +269,6 @@ class GeometricSIA(SIA):
             if len(available_indexes) >= k:
                 adicionales = np.random.choice(available_indexes, k, replace=False)
                 poblacion[i, adicionales] = 1
-
-        start_time = time.time()
         no_improve = 0
         prev_phi = float('inf')
         global_best_phi = best_loss
@@ -346,13 +341,12 @@ class GeometricSIA(SIA):
         complemento = self.nodes_complement(seleccion)
         particion_str = fmt_biparte_q(seleccion, complemento)
 
-        print("ya termine")
         return Solution(
             estrategia=GA_LABEL,
             perdida=best_phi,
             distribucion_subsistema=self.dists_ref,
             distribucion_particion=dist,
-            tiempo_total=time.time() - start_time,
+            tiempo_total=time.time() - self.start_time,
             particion=particion_str,
         )
 

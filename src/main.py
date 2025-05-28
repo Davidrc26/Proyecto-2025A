@@ -11,7 +11,7 @@ def iniciar():
                      #ABCDEFGHIJKLMNO# t+1
     alcance =        "111111111111111"
                      #ABCDEFGHIJKLMNO# t
-    mecanismo =      "111111111111110"
+    mecanismo =      "101010101010101"
 
     gestor_sistema = Manager(estado_inicial)
 
@@ -25,3 +25,5 @@ def iniciar():
     )
     print(sia_uno)
 
+
+# 
