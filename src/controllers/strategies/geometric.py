@@ -248,7 +248,7 @@ class GeometricSIA(SIA):
         presentes = self.sia_subsistema.dims_ncubos
         self.m = futuros.size
         n = presentes.size
-        self.N = len(self.sia_gestor.estado_inicial)
+        self.N = len(futuros) + len(presentes)
         self.indices_futuro = futuros
         self.indices_presente = presentes
         self.dists_ref = self.sia_dists_marginales
