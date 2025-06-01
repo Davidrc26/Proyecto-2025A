@@ -62,7 +62,7 @@ class System:
             - `np.ndarray`: Un arreglo con el valor promedio de cada n-cubo, representando el valor de la probabilidad de transición para cada uno de ellos.
         """
         return [
-            (cube.indice, cube.marginalizar(cube.dims).data)
+            (cube.indice, 1-cube.marginalizar(cube.dims).data)
             for cube in self.ncubos
         ]
         
@@ -275,7 +275,7 @@ class System:
             if ncubo.dims.size:
                 sub_estado_inicial = tuple(self.estado_inicial[j] for j in ncubo.dims)
                 probabilidad = ncubo.data[seleccionar_subestado(sub_estado_inicial)]
-            distribuciones[i] = 1 - probabilidad
+            distribuciones[i] = 1-probabilidad
         return distribuciones
 
     def __str__(self) -> str:
