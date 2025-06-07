@@ -1,29 +1,54 @@
 from src.controllers.manager import Manager
-
-from src.controllers.strategies.force import BruteForce
-from src.controllers.strategies.basic import Basic
+import pandas as pd
+import re
+from src.strategies.q_nodes import QNodes
+from src.strategies.geometric import GeometricSIA
 
 
 def iniciar():
-    """Punto de entrada principal"""
-    # ABCD #
-    estado_inicial = "100"
-    condiciones = "111"
-    alcance = "111"
-    mecanismo = "111"
+    df = read_tests()
+    data = df["20_nodos"]
+
+    estado_inicial = "10000000000000000000"
+
+    condiciones =    "11111111111111111111" 
+
+    alcance, mecanismo = extraer_cadenas(data[48], len(estado_inicial))
 
     gestor_sistema = Manager(estado_inicial)
 
     ### Ejemplo de solución mediante módulo de fuerza bruta ###
-    analizador_phi = Basic(gestor_sistema)
-    analizador_bf = BruteForce(gestor_sistema)
+    analizador_fb = QNodes(gestor_sistema)
 
-    sia_cero = analizador_phi.aplicar_estrategia(
+    sia_uno = analizador_fb.aplicar_estrategia(
         condiciones,
         alcance,
         mecanismo,
     )
+    print(sia_uno)
 
-    sia_bf = analizador_bf.analizar_completamente_una_red()
-    print(sia_cero)
-    print(sia_bf)
+
+
+def save_results(solutions, filename):
+    """Guarda el resultado en un archivo CSV"""
+    data = [obj.__dict__ for obj in solutions]
+    df = pd.DataFrame(data=data)
+    df.to_excel(filename, index=False)
+
+def read_tests():
+    """Función para leer los tests desde un archivo CSV"""
+    df = pd.read_excel("./pruebasAEjecutar.xlsx", sheet_name="Hoja1")
+    return df
+
+def extraer_cadenas(texto, tamaño_red):
+    abecedario = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    abecedario = abecedario[:tamaño_red]
+    patron = r'([A-Z]+)_\{t\+1\}\|([A-Z]+)_\{t\}'
+    coincidencia = re.match(patron, texto)
+    if coincidencia:
+        cadena1 = ''.join('1' if letra in coincidencia.group(1) else '0' for letra in abecedario)
+        cadena2 = ''.join('1' if letra in coincidencia.group(2) else '0' for letra in abecedario)
+        return cadena1, cadena2
+    else:
+        return None, None
+

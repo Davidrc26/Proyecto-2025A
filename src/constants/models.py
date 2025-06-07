@@ -29,3 +29,10 @@ QNODES_ANALYSIS_TAG: str = f"{QNODES_LABEL}_analysis"
 GEOMETRIC_LABEL: str = "Geometric"
 GEOMETRIC_STRAREGY_TAG: str = f"{GEOMETRIC_LABEL}_strategy"
 GEOMETRIC_ANALYSIS_TAG: str = f"{GEOMETRIC_LABEL}_analysis"
+
+#Genetic Algorithm
+GA_LABEL: str = "GeneticAlgorithm"
+GA_STRAREGY_TAG: str = f"{GA_LABEL}_strategy"
+GA_ANALYSIS_TAG: str = f"{GA_LABEL}_analysis"
+GA_STRATEGY_TAG: str = f"{GA_LABEL}_strategy"
+

@@ -7,7 +7,7 @@ from src.main import iniciar
 def main():
     """Inicializar el aplicativo."""
 
-    aplicacion.profiler_habilitado = True
+    aplicacion.profiler_habilitado = False
     aplicacion.pagina_sample_network = "A"
 
     iniciar()

@@ -62,6 +62,19 @@ class System:
             self.ncubos[INT_ZERO].dims if len(self.ncubos) > INT_ZERO else np.array([])
         )
 
+    @property
+    def collapsed_ncubes(self):
+        """
+        Retorna los n-cubos colapsados, es decir, aquellos que no tienen dimensiones asociadas a ellos, por lo que su valor es el mismo para todos los estados posibles.
+
+        Returns:
+            - `np.ndarray`: Un arreglo con el valor promedio de cada n-cubo, representando el valor de la probabilidad de transición para cada uno de ellos.
+        """
+        return [
+            (cube.indice, 1-cube.marginalizar(cube.dims).data)
+            for cube in self.ncubos
+        ]
+
     def condicionar(self, indices: NDArray[np.int8]) -> "System":
         """
         A partir de un sistema origina, esta operación se aplica para todo n-cubo, también llamada como aplicar condiciones de fondo, hace que este se vea seleccionado el cubo en su totalidad, pero delimitando en las dimensiones o indices especificados para hacer selección según el estado inicial asociado.
