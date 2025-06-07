@@ -425,8 +425,3 @@ class GeometricSIA(SIA):
                 tiempo_total=time.time() - self.start_time,
                 particion=particion_str1,
             )
-
-
-
-
-
