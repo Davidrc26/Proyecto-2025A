@@ -51,6 +51,21 @@ class System:
         return np.array([cube.indice for cube in self.ncubos], dtype=np.int8)
 
     @property
+    def collapsed_ncubes(self):
+        """
+        Retorna los n-cubos colapsados, es decir, aquellos que no tienen dimensiones asociadas a ellos, por lo que su valor es el mismo para todos los estados posibles.
+
+        Returns:
+            - `np.ndarray`: Un arreglo con el valor promedio de cada n-cubo, representando el valor de la probabilidad de transición para cada uno de ellos.
+        """
+        return [
+            (cube.indice, 1-cube.marginalizar(cube.dims).data)
+            for cube in self.ncubos
+        ]
+        
+   
+
+    @property
     def dims_ncubos(self):
         """
         Retorna las dimensiones que se preserven en los n-cubos del sistema. No es un método aplicable tras generación de particiones puesto no necesariamente todos los n-cubos mantendrán las mismas dimensiones.

@@ -7,6 +7,7 @@ from src.middlewares.profile import profiler_manager, profile
 from src.middlewares.slogger import SafeLogger
 from src.models.core.solution import Solution
 from typing import List, Tuple
+import threading
 
 import numpy as np
 from src.funcs.base import emd_efecto  # lo necesitarás después
@@ -34,7 +35,7 @@ class GeometricSIA(SIA):
         self.crossover_rate: float = 0.7
         self.mutation_rate: float = 0.05
         self.elitism: int = 1
-        self.patience: int = 20
+        self.patience: int = 10
         self.N: int = 0
         self.m: int = 0
         self._cost_cache = {}
@@ -105,7 +106,13 @@ class GeometricSIA(SIA):
             for j, cost in row.items():
                 sum_per_j[j] = sum_per_j.get(j, 0.0) + cost
         best_j = min(sum_per_j, key=sum_per_j.get)
-    
+
+        #sumar costes de cada diccionario 
+        # suma_por_clave = {clave: sum(subdic.values()) for clave, subdic in self.T.items()}
+        # suma_ordenada = dict(sorted(suma_por_clave.items(), key=lambda item: item[1]))
+        # print(suma_ordenada)
+
+
         # determinar bits cambiados y variables con coste
         changed_bits = [
             self.sia_subsistema.dims_ncubos[idx]
@@ -144,7 +151,7 @@ class GeometricSIA(SIA):
         # Si ambos valores de phi no son cero, retornar el de menor valor
         if phi_fase1 < phi_fase2:
             #Genetico (columnas-futuro)
-            solution = self.explorate_neigborhood(best_col, phi_fase1)
+            solution = self.explorate_genetic(best_col, phi_fase1)
 
             if solution.perdida >= phi_fase1:
                 seleccion = [(1, i) for i in alcance_fase1] + [(0, i) for i in mecanismo_fase1]
@@ -175,6 +182,7 @@ class GeometricSIA(SIA):
                     particion=particion_str,
                 ) 
         else:
+            solution = self.explorate_neighbors(best_j=best_j)
             #Calcular los vecinos del mejor (filas- presente)
             pass
             
@@ -242,7 +250,7 @@ class GeometricSIA(SIA):
             self._cache_genetic[key] = phi
         return -phi
 
-    def explorate_neigborhood(self, best_ncube: int, best_loss: float) -> Solution:
+    def explorate_genetic(self, best_ncube: int, best_loss: float) -> Solution:
         futuros = self.sia_subsistema.indices_ncubos
         presentes = self.sia_subsistema.dims_ncubos
         self.m = futuros.size
@@ -348,6 +356,76 @@ class GeometricSIA(SIA):
             tiempo_total=time.time() - self.start_time,
             particion=particion_str,
         )
+
+    def explorate_neighbors(self, best_j: int) -> Solution:
+        """
+        Fase 3: expansión local desde best_j,
+        cambiando un bit adicional no modificado en i0 → best_j.
+        """
+        # Asegúrate de haber guardado best_j en self.best_j tras Fase 2
+        # 1) Detectar bits ya cambiados en i0 → best_j
+        bits_cambiados = {
+            b for b in range(self.N)
+            if ((self.i0 >> b) & 1) != ((best_j >> b) & 1)
+        }
+
+        # 2) Generar nuevos vecinos cambiando un bit distinto
+        j_candidates = [
+            best_j ^ (1 << b)
+            for b in range(self.N)
+            if b not in bits_cambiados
+        ]
+        # Eliminar posibles duplicados conservando orden
+        j_candidates = list(dict.fromkeys(j_candidates))
+
+        # 3) Calcular costes t(i0 → j) para cada vecino
+        self.T.clear()
+        for i, nc in enumerate(self.sia_subsistema.ncubos):
+            self.proccess_nc(nc, self.sia_subsistema.indices_ncubos[i], j_candidates)
+
+        # 4) Sumatoria de costes por cada j y selección de best_j2
+        sum_per_j = {}
+        for row in self.T.values():
+            for j, cost in row.items():
+                sum_per_j[j] = sum_per_j.get(j, 0.0) + cost
+        best_j2 = min(sum_per_j, key=sum_per_j.get)
+
+        # 5) Determinar bits cambiados adicionales y variables con coste no nulo
+        changed_bits2 = [
+            self.sia_subsistema.dims_ncubos[idx]
+            for idx in range(self.N)
+            if ((best_j >> idx) & 1) != ((best_j2 >> idx) & 1)
+        ]
+
+        changed_bits2.append(best_j)
+        nonzero2 = [
+            v for v, row in self.T.items()
+            if abs(row.get(best_j2, 0.0)) > 1e-12
+        ]
+
+        # 6) Bipartición y cálculo de phi
+        alcance   = np.array(nonzero2,    dtype=np.int8)
+        mecanismo = np.array([changed_bits2], dtype=np.int8)
+        part      = self.sia_subsistema.bipartir(alcance, mecanismo)
+        dist      = part.distribucion_marginal()
+        phi       = emd_efecto(dist, self.sia_dists_marginales)
+
+        seleccion1 = [(1, i) for i in alcance] + [(0, i) for i in mecanismo]
+        complemento1 = (
+                [(1, i) for i in self.sia_subsistema.indices_ncubos   if i not in alcance] +
+                [(0, i) for i in self.sia_subsistema.dims_ncubos         if i not in mecanismo]
+            )
+        particion_str1 = fmt_biparte_q(seleccion1, complemento1)
+        return Solution(
+                estrategia="Geometric",
+                perdida=phi,
+                distribucion_subsistema=self.sia_dists_marginales,
+                distribucion_particion=dist,
+                tiempo_total=time.time() - self.start_time,
+                particion=particion_str1,
+            )
+
+
 
 
 
