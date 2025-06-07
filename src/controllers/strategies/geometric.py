@@ -130,7 +130,6 @@ class GeometricSIA(SIA):
         part2 = self.sia_subsistema.bipartir(alcance_fase2, mecanismo_fase2)
         dist2 = part2.distribucion_marginal()
         phi_fase2 = emd_efecto(dist2, referencia)
-        phi_fase2 = 0.0000000000000000000001
     
         # si pérdida en fase 2 es 0, retornamos también
         if phi_fase2 == 0:
@@ -412,19 +411,20 @@ class GeometricSIA(SIA):
         dist      = part.distribucion_marginal()
         phi       = emd_efecto(dist, self.sia_dists_marginales)
 
-        # 7) Construir partición en formato Q
-        seleccion     = [(1, i) for i in alcance] + [(0, i) for i in mecanismo]
-        complemento    = self.nodes_complement(seleccion)
-        particion_str = fmt_biparte_q(seleccion, complemento)
-
+        seleccion1 = [(1, i) for i in alcance] + [(0, i) for i in mecanismo]
+        complemento1 = (
+                [(1, i) for i in self.sia_subsistema.indices_ncubos   if i not in alcance] +
+                [(0, i) for i in self.sia_subsistema.dims_ncubos         if i not in mecanismo]
+            )
+        particion_str1 = fmt_biparte_q(seleccion1, complemento1)
         return Solution(
-            estrategia="GeometricNeighbors",
-            perdida=phi,
-            distribucion_subsistema=self.sia_dists_marginales,
-            distribucion_particion=dist,
-            tiempo_total=time.time() - self.start_time,
-            particion=particion_str,
-        )
+                estrategia="Geometric",
+                perdida=phi,
+                distribucion_subsistema=self.sia_dists_marginales,
+                distribucion_particion=dist,
+                tiempo_total=time.time() - self.start_time,
+                particion=particion_str1,
+            )
 
 
 
