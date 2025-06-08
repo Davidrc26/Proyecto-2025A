@@ -169,7 +169,6 @@ class GeometricSIA(SIA):
                     particion=particion_str,
                 )
             else:
-                # Si la solución no es None, significa que se encontró una mejor partición
                 seleccion = solution.particion
             
                 particion_str = fmt_biparte_q(seleccion, complemento)
@@ -182,10 +181,26 @@ class GeometricSIA(SIA):
                     particion=particion_str,
                 ) 
         else:
-            solution = self.explorate_neighbors(best_j=best_j)
+            solution = self.explorate_neighbors(best_j=best_j, changed_bits=changed_bits)
             #Calcular los vecinos del mejor (filas- presente)
-            pass
-            
+            if solution.perdida >= phi_fase2:
+                seleccion2 = [(1, i) for i in alcance_fase2] + [(0, i) for i in mecanismo_fase2]
+                complemento2 = (
+                [(1, i) for i in self.sia_subsistema.indices_ncubos   if i not in alcance_fase2] +
+                [(0, i) for i in self.sia_subsistema.dims_ncubos         if i not in mecanismo_fase2]
+            )
+                particion_str2 = fmt_biparte_q(seleccion2, complemento2)
+                return Solution(
+                estrategia="Geometric",
+                perdida=phi_fase2,
+                distribucion_subsistema=referencia,
+                distribucion_particion=dist2,
+                tiempo_total=time.time() - self.start_time,
+                particion=particion_str2,
+            )
+            else:
+                return solution
+
 
     def _calcular_transicion_coste(
         self,
@@ -357,7 +372,7 @@ class GeometricSIA(SIA):
             particion=particion_str,
         )
 
-    def explorate_neighbors(self, best_j: int) -> Solution:
+    def explorate_neighbors(self, best_j: int, changed_bits: list) -> Solution:
         """
         Fase 3: expansión local desde best_j,
         cambiando un bit adicional no modificado en i0 → best_j.
@@ -397,7 +412,7 @@ class GeometricSIA(SIA):
             if ((best_j >> idx) & 1) != ((best_j2 >> idx) & 1)
         ]
 
-        changed_bits2.append(best_j)
+        changed_bits2.extend(changed_bits)
         nonzero2 = [
             v for v, row in self.T.items()
             if abs(row.get(best_j2, 0.0)) > 1e-12
@@ -405,7 +420,7 @@ class GeometricSIA(SIA):
 
         # 6) Bipartición y cálculo de phi
         alcance   = np.array(nonzero2,    dtype=np.int8)
-        mecanismo = np.array([changed_bits2], dtype=np.int8)
+        mecanismo = np.array(changed_bits2, dtype=np.int8)
         part      = self.sia_subsistema.bipartir(alcance, mecanismo)
         dist      = part.distribucion_marginal()
         phi       = emd_efecto(dist, self.sia_dists_marginales)
@@ -423,8 +438,7 @@ class GeometricSIA(SIA):
                 distribucion_particion=dist,
                 tiempo_total=time.time() - self.start_time,
                 particion=particion_str1,
-            )
-
+        )
 
 
 
