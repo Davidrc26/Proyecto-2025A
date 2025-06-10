@@ -104,7 +104,7 @@ classDiagram
         +aplicar_estrategia(condiciones: str, alcance: str, mecanismo: str)
     }
 
-    class QNodes{
+    class GeometricSia{
         +int m
         +int n
         +tuple tiempos
@@ -187,7 +187,7 @@ classDiagram
     %% Relaciones
     SIA <|-- BruteForce
     SIA <|-- Phi
-    SIA <|-- QNodes
+    SIA <|-- GeometricSia
     Manager <-- SIA: Configuración
     System o-- NCube: Contiene
     BruteForce --> System: Usa
