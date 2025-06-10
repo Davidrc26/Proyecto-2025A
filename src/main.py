@@ -7,18 +7,18 @@ from src.strategies.geometric import GeometricSIA
 
 def iniciar():
     df = read_tests()
-    data = df["20_nodos"]
+    data = df["10_nodos_a"]
 
-    estado_inicial = "10000000000000000000"
+    estado_inicial = "1000000000"
 
-    condiciones =    "11111111111111111111" 
+    condiciones =    "1111111111" 
 
-    alcance, mecanismo = extraer_cadenas(data[48], len(estado_inicial))
+    alcance, mecanismo = extraer_cadenas(data[35], len(estado_inicial))
 
     gestor_sistema = Manager(estado_inicial)
 
     ### Ejemplo de solución mediante módulo de fuerza bruta ###
-    analizador_fb = QNodes(gestor_sistema)
+    analizador_fb = GeometricSIA(gestor_sistema)
 
     sia_uno = analizador_fb.aplicar_estrategia(
         condiciones,
